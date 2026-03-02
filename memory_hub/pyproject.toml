@@ -1,0 +1,20 @@
+[project]
+name = "memory-hub"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.1",
+    "rich>=13.0",
+    "streamlit>=1.40",
+    "pandas>=1.4",
+]
+
+[project.scripts]
+hub = "memory_hub.cli:cli"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
