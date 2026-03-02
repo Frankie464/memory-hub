@@ -5,7 +5,7 @@ from pathlib import Path
 from memory_hub.config import DB_PATH, RAW_DIR, REPORTS_DIR
 from memory_hub.db import get_connection, get_stats
 from memory_hub.ingest.chatgpt import ingest_chatgpt_zip
-from memory_hub.ingest.claude import ingest_claude_memory
+from memory_hub.ingest.chatgpt_memory import ingest_chatgpt_memory
 from memory_hub.project.claude_chat import project_claude_chat
 from memory_hub.project.claude_code import project_claude_code
 from memory_hub.project.openclaw import project_openclaw
@@ -44,7 +44,7 @@ def _auto_find_latest(directory: Path, pattern: str) -> Path | None:
 def sync_weekly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
     """
     Weekly sync workflow:
-    1. Ingest latest Claude memory export (if available in raw/claude_exports/)
+    1. Ingest latest ChatGPT memory dump (if available in raw/chatgpt_exports/)
     2. Reconcile facts
     3. Generate projections for Claude.ai, Claude Code, OpenClaw
     4. Write sync report
@@ -52,16 +52,16 @@ def sync_weekly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     results = {"profile": "weekly", "ran_at": now, "steps": []}
 
-    # Step 1: Ingest Claude memory export (auto-find latest)
-    claude_export = _auto_find_latest(RAW_DIR / "claude_exports", "*.md")
-    if claude_export:
+    # Step 1: Ingest ChatGPT memory dump (auto-find latest .md)
+    memory_dump = _auto_find_latest(RAW_DIR / "chatgpt_exports", "*.md")
+    if memory_dump:
         try:
-            stats = ingest_claude_memory(claude_export, db_path)
-            results["steps"].append(f"✓ Claude ingest: {stats['added']} new entries from {claude_export.name}")
+            stats = ingest_chatgpt_memory(memory_dump, db_path)
+            results["steps"].append(f"✓ ChatGPT memory ingest: {stats['added']} new entries from {memory_dump.name}")
         except Exception as e:
-            results["steps"].append(f"✗ Claude ingest failed: {e}")
+            results["steps"].append(f"✗ ChatGPT memory ingest failed: {e}")
     else:
-        results["steps"].append("⚠ No Claude memory export found in data/raw/claude_exports/")
+        results["steps"].append("⚠ No ChatGPT memory dump found in data/raw/chatgpt_exports/")
 
     # Step 2: Reconcile
     try:
@@ -99,7 +99,7 @@ def sync_monthly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
     """
     Monthly sync workflow:
     1. Ingest latest ChatGPT ZIP (auto-find in raw/chatgpt_exports/)
-    2. Ingest latest Claude memory export
+    2. Ingest latest ChatGPT memory dump (if available)
     3. Reconcile
     4. Generate ALL projections
     5. Write sync report
@@ -121,16 +121,16 @@ def sync_monthly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
     else:
         results["steps"].append("⚠ No ChatGPT export ZIP found in data/raw/chatgpt_exports/")
 
-    # Step 2: Ingest Claude memory export
-    claude_export = _auto_find_latest(RAW_DIR / "claude_exports", "*.md")
-    if claude_export:
+    # Step 2: Ingest ChatGPT memory dump (auto-find latest .md)
+    memory_dump = _auto_find_latest(RAW_DIR / "chatgpt_exports", "*.md")
+    if memory_dump:
         try:
-            stats = ingest_claude_memory(claude_export, db_path)
-            results["steps"].append(f"✓ Claude ingest: {stats['added']} new entries")
+            stats = ingest_chatgpt_memory(memory_dump, db_path)
+            results["steps"].append(f"✓ ChatGPT memory ingest: {stats['added']} new entries")
         except Exception as e:
-            results["steps"].append(f"✗ Claude ingest failed: {e}")
+            results["steps"].append(f"✗ ChatGPT memory ingest failed: {e}")
     else:
-        results["steps"].append("⚠ No Claude memory export found")
+        results["steps"].append("⚠ No ChatGPT memory dump found")
 
     # Step 3: Reconcile
     try:

@@ -65,20 +65,22 @@ The Setup Wizard walks you through everything step by step (import data, build p
 
 ## Per-Platform Instructions
 
-### Claude.ai (Web Chat)
+### ChatGPT Memory Dump (Optional)
 
-**Export your memories:**
-1. Go to [claude.ai](https://claude.ai) -> Settings -> Privacy
-2. Click "Export memories" — downloads a `.md` file
+If you asked ChatGPT to list all its stored memories about you (the `[date] - content` format),
+you can import that dump as a quick bootstrap:
 
-**Import into memory-hub:**
 ```bash
-# Copy the .md file to data/raw/claude_exports/
-hub ingest claude-memory --file data/raw/claude_exports/your_export.md
+# Copy the .md file to data/raw/chatgpt_exports/
+hub ingest chatgpt-memory --file data/raw/chatgpt_exports/your_memory_dump.md
 hub reconcile
 ```
 
-**Push memories back to Claude.ai:**
+This is optional if you already have the full ChatGPT conversation ZIP (Step 1 above).
+
+### Claude.ai (Web Chat)
+
+**Push memories to Claude.ai:**
 ```bash
 hub project claude-chat
 ```
@@ -143,7 +145,7 @@ This generates three files in `data/projections/chatgpt/`:
 | `hub init` | Create data directories and initialize database |
 | `hub gui` | Launch Streamlit web dashboard |
 | `hub ingest chatgpt --zip <path>` | Ingest ChatGPT export ZIP |
-| `hub ingest claude-memory --file <path>` | Ingest Claude memory export |
+| `hub ingest chatgpt-memory --file <path>` | Ingest ChatGPT memory dump |
 | `hub reconcile` | Extract facts from events, detect conflicts |
 | `hub project claude-chat` | Generate Claude.ai memory import chunks |
 | `hub project claude-code [--deploy]` | Generate/deploy Claude Code files |
@@ -165,23 +167,23 @@ Export from AI  ->  Ingest  ->  Reconcile  ->  Project  ->  Deploy
 ```
 
 **Weekly sync** (`hub sync --profile weekly`):
-1. Auto-finds the latest Claude memory export in `data/raw/claude_exports/`
+1. Auto-finds the latest ChatGPT memory dump (`.md`) in `data/raw/chatgpt_exports/`
 2. Ingests it (skips duplicates)
 3. Runs reconcile to extract/update facts
 4. Generates projections for Claude.ai, Claude Code, and OpenClaw
 5. Writes a timestamped report to `reports/`
 
 **Monthly sync** (`hub sync --profile monthly`):
-1. Auto-finds the latest ChatGPT ZIP in `data/raw/chatgpt_exports/`
-2. Also ingests latest Claude export
+1. Auto-finds the latest ChatGPT conversation ZIP in `data/raw/chatgpt_exports/`
+2. Also ingests latest ChatGPT memory dump (if available)
 3. Reconciles everything
 4. Generates projections for ALL platforms (including ChatGPT)
 5. Writes a report
 
 **To run manually:**
 ```bash
-hub sync --profile weekly           # Quick sync (Claude + reconcile + 3 projections)
-hub sync --profile monthly          # Full sync (ChatGPT + Claude + all projections)
+hub sync --profile weekly           # Quick sync (memory dump + reconcile + 3 projections)
+hub sync --profile monthly          # Full sync (conversations + memories + all projections)
 hub sync --profile weekly --deploy  # Sync AND deploy to platform locations
 ```
 
@@ -190,8 +192,8 @@ hub sync --profile weekly --deploy  # Sync AND deploy to platform locations
 ## Automation (Windows Task Scheduler)
 
 PowerShell scripts are in `scripts/`:
-- `run_weekly.ps1` — ingest Claude export + reconcile + project Claude/OpenClaw
-- `run_monthly.ps1` — ingest ChatGPT + Claude + reconcile + all projections
+- `run_weekly.ps1` — ingest ChatGPT memories + reconcile + project Claude/OpenClaw
+- `run_monthly.ps1` — ingest ChatGPT conversations + memories + reconcile + all projections
 
 Register with Task Scheduler (run in PowerShell as Admin):
 ```powershell

@@ -133,17 +133,17 @@ def ingest_chatgpt(zip_path: Path, db_path: Path):
     )
 
 
-@ingest.command("claude-memory")
+@ingest.command("chatgpt-memory")
 @click.option("--file", "file_path", required=True, type=click.Path(exists=True, path_type=Path),
-              help="Path to Claude memory export markdown file")
+              help="Path to ChatGPT memory dump markdown file")
 @click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)
-def ingest_claude(file_path: Path, db_path: Path):
-    """Ingest Claude memory export markdown file."""
-    from memory_hub.ingest.claude import ingest_claude_memory
+def ingest_chatgpt_memory(file_path: Path, db_path: Path):
+    """Ingest ChatGPT memory dump markdown file."""
+    from memory_hub.ingest.chatgpt_memory import ingest_chatgpt_memory
     _db = db_path or DB_PATH
-    console.print(f"[bold]Ingesting Claude memory export:[/bold] {file_path.name}")
+    console.print(f"[bold]Ingesting ChatGPT memory dump:[/bold] {file_path.name}")
     with console.status("Parsing entries..."):
-        stats = ingest_claude_memory(file_path, _db)
+        stats = ingest_chatgpt_memory(file_path, _db)
     console.print(
         f"  [green]OK[/green] {stats['added']} new entries added, "
         f"{stats['skipped']} skipped"

@@ -1,4 +1,5 @@
 """SQLite database management — schema, helpers, and connection context."""
+import hashlib
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -110,9 +111,42 @@ def init_db(db_path: Path = DB_PATH) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.executescript(SCHEMA)
+        _run_migrations(conn)
         conn.commit()
     finally:
         conn.close()
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """Run versioned migrations. Each migration runs exactly once."""
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+    if version < 1:
+        # v1: Fix misattributed ChatGPT memory dump events (were labeled 'claude').
+        # Also recompute event_ids to content-only hashes (no source prefix).
+        rows = conn.execute(
+            "SELECT event_id, content FROM events "
+            "WHERE conversation_title IN ('Claude Memory Export', 'ChatGPT Memory Dump')"
+        ).fetchall()
+        for old_id, content in rows:
+            new_id = hashlib.sha256(content.strip().encode()).hexdigest()
+            if old_id != new_id:
+                conn.execute(
+                    "UPDATE events SET event_id=?, source='chatgpt', "
+                    "conversation_title='ChatGPT Memory Dump' WHERE event_id=?",
+                    (new_id, old_id),
+                )
+                # Update evidence references in facts table
+                conn.execute(
+                    "UPDATE facts SET evidence_event_ids = REPLACE(evidence_event_ids, ?, ?) "
+                    "WHERE evidence_event_ids LIKE ?",
+                    (old_id, new_id, f"%{old_id}%"),
+                )
+        conn.execute(
+            "UPDATE ingest_log SET source='chatgpt' "
+            "WHERE source='claude' AND file_path LIKE '%.md'"
+        )
+        conn.execute("PRAGMA user_version = 1")
 
 
 @contextmanager

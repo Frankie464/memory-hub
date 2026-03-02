@@ -1,4 +1,4 @@
-"""Parse Claude memory export markdown into events."""
+"""Parse ChatGPT memory dump markdown into events."""
 import hashlib
 import re
 from pathlib import Path
@@ -14,16 +14,16 @@ _UNDATED_RE = re.compile(r"^\[undated[^\]]*\]\s*-\s*(.+)$", re.IGNORECASE)
 _CODE_FENCE = re.compile(r"^```")
 
 
-def _content_hash(text: str, source: str = "claude") -> str:
-    raw = f"{source}:{text.strip()}"
-    return hashlib.sha256(raw.encode()).hexdigest()
+def _content_hash(text: str) -> str:
+    """Content-addressed hash for dedup. Purely content-based, no source prefix."""
+    return hashlib.sha256(text.strip().encode()).hexdigest()
 
 
-def ingest_claude_memory(file_path: Path, db_path: Path = DB_PATH) -> dict:
+def ingest_chatgpt_memory(file_path: Path, db_path: Path = DB_PATH) -> dict:
     """
-    Parse a Claude memory export markdown file and insert events.
+    Parse a ChatGPT memory dump markdown file and insert events.
 
-    The export format from user_memory_export.md is:
+    The export format (from prompting ChatGPT to list all stored memories):
       ```text
       [YYYY-MM-DD] - Category (provided by user): Content
       [undated] - Category: Content
@@ -32,7 +32,7 @@ def ingest_claude_memory(file_path: Path, db_path: Path = DB_PATH) -> dict:
     """
     file_path = Path(file_path)
     if not file_path.exists():
-        raise FileNotFoundError(f"Claude export not found: {file_path}")
+        raise FileNotFoundError(f"ChatGPT memory dump not found: {file_path}")
 
     text = file_path.read_text(encoding="utf-8")
     stats = {"entries_found": 0, "added": 0, "skipped": 0}
@@ -79,18 +79,18 @@ def ingest_claude_memory(file_path: Path, db_path: Path = DB_PATH) -> dict:
     flush()
 
     with get_connection(db_path) as conn:
-        log_id = log_ingest_start(conn, "claude", str(file_path))
+        log_id = log_ingest_start(conn, "chatgpt", str(file_path))
 
         for ts, content in entries:
             stats["entries_found"] += 1
             event = {
                 "event_id": _content_hash(content),
-                "source": "claude",
+                "source": "chatgpt",
                 "timestamp_utc": ts,
                 "role": "system",
                 "content": content,
                 "conversation_id": None,
-                "conversation_title": "Claude Memory Export",
+                "conversation_title": "ChatGPT Memory Dump",
                 "topic_tags": "[]",
             }
             if insert_event(conn, event):

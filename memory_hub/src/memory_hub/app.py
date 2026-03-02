@@ -276,7 +276,7 @@ elif page == "🧭 Setup Wizard":
     steps_done = sum([
         _db_ready(),
         PROFILE_MANUAL_PATH.exists(),
-        (RAW_DIR / "claude_exports").exists() and any((RAW_DIR / "claude_exports").glob("*.md")),
+        (RAW_DIR / "chatgpt_exports").exists() and any((RAW_DIR / "chatgpt_exports").glob("*.md")),
         (RAW_DIR / "chatgpt_exports").exists() and any((RAW_DIR / "chatgpt_exports").glob("*.zip")),
         PROFILE_GENERATED_PATH.exists(),
     ])
@@ -329,36 +329,34 @@ This is safe to run more than once.
         if _db_ready():
             st.success("✅ Already initialized")
 
-    # ── Step 3: Ingest Claude memory export ────────────────────────────────
-    with st.expander("🤖 Step 3 — Import your Claude memory export", expanded=_db_ready() and not PROFILE_GENERATED_PATH.exists()):
+    # ── Step 3: Ingest ChatGPT memory dump ──────────────────────────────
+    with st.expander("💬 Step 3 — Import ChatGPT stored memories (optional)", expanded=_db_ready() and not PROFILE_GENERATED_PATH.exists()):
         st.markdown("""
-Import the `user_memory_export.md` file (your Claude memory export).
-If it's in the project folder, it was already copied to `data/raw/claude_exports/` — just drop any `.md` file there.
+Import a ChatGPT memory dump (`.md` file with `[date] - content` entries).
+This is optional if you're importing the full ChatGPT conversation ZIP in Step 4.
 
-**To get your Claude memory export:**
-1. Go to [claude.ai](https://claude.ai) → Settings → Privacy
-2. Click **Export memories** — downloads a `.md` file
-3. Drop it into `data/raw/claude_exports/`
+**To create a memory dump:** Ask ChatGPT to list all stored memories about you.
+Drop the `.md` file into `data/raw/chatgpt_exports/` or upload it here.
 """)
-        uploaded = st.file_uploader("Upload Claude memory export (.md)", type=["md"], key="claude_upload")
+        uploaded = st.file_uploader("Upload ChatGPT memory dump (.md)", type=["md"], key="chatgpt_mem_upload")
         if uploaded:
-            dest = RAW_DIR / "claude_exports" / uploaded.name
+            dest = RAW_DIR / "chatgpt_exports" / uploaded.name
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(uploaded.getbuffer())
             st.success(f"Saved to {dest}")
 
-        claude_exports = list((RAW_DIR / "claude_exports").glob("*.md")) if (RAW_DIR / "claude_exports").exists() else []
-        if claude_exports:
-            selected = st.selectbox("File to ingest", [f.name for f in claude_exports])
-            if st.button("Ingest Claude Memory", type="primary"):
+        chatgpt_mds = list((RAW_DIR / "chatgpt_exports").glob("*.md")) if (RAW_DIR / "chatgpt_exports").exists() else []
+        if chatgpt_mds:
+            selected = st.selectbox("File to ingest", [f.name for f in chatgpt_mds])
+            if st.button("Ingest ChatGPT Memory Dump", type="primary"):
                 _require_db()
-                from memory_hub.ingest.claude import ingest_claude_memory
-                chosen = RAW_DIR / "claude_exports" / selected
+                from memory_hub.ingest.chatgpt_memory import ingest_chatgpt_memory
+                chosen = RAW_DIR / "chatgpt_exports" / selected
                 with st.spinner("Ingesting..."):
-                    stats = ingest_claude_memory(chosen, DB_PATH)
+                    stats = ingest_chatgpt_memory(chosen, DB_PATH)
                 st.success(f"✅ {stats['added']} entries added, {stats['skipped']} skipped")
         else:
-            st.info("No `.md` files found in `data/raw/claude_exports/`. Upload one above or copy it there.")
+            st.info("No `.md` files found in `data/raw/chatgpt_exports/`. Upload one above or copy it there.")
 
     # ── Step 4: Ingest ChatGPT export ──────────────────────────────────────
     with st.expander("💬 Step 4 — Import your ChatGPT full history (when ZIP arrives)", expanded=False):
@@ -445,7 +443,7 @@ elif page == "📥 Ingest Data":
     st.title("📥 Ingest Data")
     _require_db()
 
-    tab_cg, tab_cl = st.tabs(["💬 ChatGPT", "🤖 Claude"])
+    tab_cg, tab_cl = st.tabs(["💬 ChatGPT Conversations", "💬 ChatGPT Memories"])
 
     with tab_cg:
         st.subheader("ChatGPT Export Ingest")
@@ -493,36 +491,38 @@ Duplicate messages are automatically skipped on re-ingest.
             st.caption("No ChatGPT ingests yet.")
 
     with tab_cl:
-        st.subheader("Claude Memory Export Ingest")
+        st.subheader("ChatGPT Memory Dump Ingest")
         st.markdown("""
-Export your Claude memories from [claude.ai → Settings → Privacy → Export memories].
-Upload the `.md` file or drop it into `data/raw/claude_exports/`.
+Import a ChatGPT memory dump — a `.md` file with `[date] - content` entries.
+Create one by asking ChatGPT to list all stored memories about you.
+Upload the file or drop it into `data/raw/chatgpt_exports/`.
 """)
-        uploaded_md = st.file_uploader("Upload Claude memory export (.md)", type=["md"], key="ingest_cl_up")
+        uploaded_md = st.file_uploader("Upload ChatGPT memory dump (.md)", type=["md"], key="ingest_mem_up")
         if uploaded_md:
-            dest = RAW_DIR / "claude_exports" / uploaded_md.name
+            dest = RAW_DIR / "chatgpt_exports" / uploaded_md.name
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(uploaded_md.getbuffer())
             st.success(f"Saved: {dest.name}")
 
-        mds = sorted((RAW_DIR / "claude_exports").glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True) \
-            if (RAW_DIR / "claude_exports").exists() else []
+        mds = sorted((RAW_DIR / "chatgpt_exports").glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True) \
+            if (RAW_DIR / "chatgpt_exports").exists() else []
         if mds:
-            chosen_md = st.selectbox("Select file to ingest", [m.name for m in mds], key="cl_select")
-            if st.button("Ingest Claude Memory", type="primary", key="cl_ingest"):
-                from memory_hub.ingest.claude import ingest_claude_memory
+            chosen_md = st.selectbox("Select file to ingest", [m.name for m in mds], key="mem_select")
+            if st.button("Ingest ChatGPT Memory Dump", type="primary", key="mem_ingest"):
+                from memory_hub.ingest.chatgpt_memory import ingest_chatgpt_memory
                 with st.spinner("Parsing..."):
-                    s = ingest_claude_memory(RAW_DIR / "claude_exports" / chosen_md, DB_PATH)
+                    s = ingest_chatgpt_memory(RAW_DIR / "chatgpt_exports" / chosen_md, DB_PATH)
                 st.success(f"✅ {s['added']} entries added, {s['skipped']} skipped")
         else:
-            st.info("No `.md` files found in `data/raw/claude_exports/`.")
+            st.info("No `.md` files found in `data/raw/chatgpt_exports/`.")
 
         st.markdown("---")
-        st.markdown("**Past ingests:**")
+        st.markdown("**Past memory dump ingests:**")
         with get_connection(DB_PATH) as conn:
             logs = conn.execute(
                 "SELECT file_path, events_added, events_skipped, completed_at "
-                "FROM ingest_log WHERE source='claude' ORDER BY started_at DESC LIMIT 10"
+                "FROM ingest_log WHERE source='chatgpt' AND file_path LIKE '%.md' "
+                "ORDER BY started_at DESC LIMIT 10"
             ).fetchall()
         if logs:
             import pandas as pd
@@ -531,7 +531,7 @@ Upload the `.md` file or drop it into `data/raw/claude_exports/`.
             df.columns = ["File", "Added", "Skipped", "Completed"]
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
-            st.caption("No Claude ingests yet.")
+            st.caption("No memory dump ingests yet.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -917,7 +917,7 @@ elif page == "🔄 Sync & Reports":
 
     with sync_col1:
         st.markdown("**Weekly Sync**")
-        st.caption("Ingest latest Claude export → Reconcile → Project Claude + OpenClaw → Report")
+        st.caption("Ingest ChatGPT memories → Reconcile → Project Claude + OpenClaw → Report")
         deploy_weekly = st.checkbox("Deploy projections", key="weekly_deploy")
         if st.button("🔄 Run Weekly Sync", type="primary", use_container_width=True):
             with st.spinner("Running weekly sync..."):
@@ -930,7 +930,7 @@ elif page == "🔄 Sync & Reports":
 
     with sync_col2:
         st.markdown("**Monthly Sync**")
-        st.caption("Ingest ChatGPT + Claude → Reconcile → All projections → Report")
+        st.caption("Ingest ChatGPT conversations + memories → Reconcile → All projections → Report")
         deploy_monthly = st.checkbox("Deploy projections", key="monthly_deploy")
         if st.button("🔄 Run Monthly Sync", type="primary", use_container_width=True):
             with st.spinner("Running monthly sync (this may take a minute)..."):
