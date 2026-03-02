@@ -8,7 +8,7 @@ Local cross-AI memory management system. Ingests conversation history from ChatG
 ## Quick Start
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/memory-hub.git
+git clone https://github.com/Frankie464/memory-hub.git
 cd memory-hub/memory_hub
 pip install -e .
 hub init
