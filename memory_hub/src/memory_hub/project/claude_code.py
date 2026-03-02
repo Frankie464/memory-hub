@@ -1,5 +1,4 @@
 """Generate CLAUDE.md additions and rules files for Claude Code."""
-import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -12,18 +11,14 @@ from memory_hub.config import (
     PROFILE_MANUAL_PATH,
     PROJ_CLAUDE_CODE,
 )
-from memory_hub.db import get_connection, get_active_facts
-
-
-def _get_statements(facts, *categories) -> list[str]:
-    return [f["statement"] for f in facts if f["category"] in categories]
+from memory_hub.db import get_connection, get_active_facts_as_dicts, get_statements, record_projections
 
 
 def _build_claude_md_block(facts: list) -> str:
-    identity = _get_statements(facts, "identity")
-    prefs = _get_statements(facts, "preference")
-    work = _get_statements(facts, "work")
-    interests = _get_statements(facts, "interest")
+    identity = get_statements(facts, "identity")
+    prefs = get_statements(facts, "preference")
+    work = get_statements(facts, "work")
+    interests = get_statements(facts, "interest")
 
     lines = [
         CLAUDE_MD_BEGIN,
@@ -54,9 +49,9 @@ def _build_claude_md_block(facts: list) -> str:
 
 
 def _build_personal_context(facts: list) -> str:
-    relationships = _get_statements(facts, "relationship")
-    lifestyle = _get_statements(facts, "lifestyle")
-    financial = _get_statements(facts, "financial")
+    relationships = get_statements(facts, "relationship")
+    lifestyle = get_statements(facts, "lifestyle")
+    financial = get_statements(facts, "financial")
 
     now = datetime.now().strftime("%Y-%m-%d")
     lines = [
@@ -77,7 +72,7 @@ def _build_personal_context(facts: list) -> str:
 
 
 def _build_work_domain(facts: list) -> str:
-    work = _get_statements(facts, "work")
+    work = get_statements(facts, "work")
     now = datetime.now().strftime("%Y-%m-%d")
     lines = [
         f"# RF Engineering Context (generated {now})",
@@ -100,7 +95,7 @@ def _build_work_domain(facts: list) -> str:
         "- Downloadable/shareable outputs (ZIPs, repos, interactive HTML)",
     ]
     for s in work:
-        if s not in "\n".join(lines):
+        if f"- {s}" not in lines:
             lines.append(f"- {s}")
     return "\n".join(lines)
 
@@ -114,14 +109,7 @@ def project_claude_code(deploy: bool = False, db_path: Path = DB_PATH) -> dict[s
     PROJ_CLAUDE_CODE.mkdir(parents=True, exist_ok=True)
 
     with get_connection(db_path) as conn:
-        facts = get_active_facts(conn)
-    facts = [dict(f) for f in facts]
-
-    # Also pull manual profile facts if available
-    if PROFILE_MANUAL_PATH.exists():
-        # Parse and supplement facts list with any manual entries not yet in DB
-        manual_text = PROFILE_MANUAL_PATH.read_text(encoding="utf-8")
-        # (Manual profile facts are already in DB after reconcile; this is just a safety pass)
+        facts = get_active_facts_as_dicts(conn)
 
     claude_md_block = _build_claude_md_block(facts)
     personal_ctx = _build_personal_context(facts)
@@ -152,15 +140,8 @@ def project_claude_code(deploy: bool = False, db_path: Path = DB_PATH) -> dict[s
         (CLAUDE_RULES_DIR / "personal-context.md").write_text(personal_ctx, encoding="utf-8")
         (CLAUDE_RULES_DIR / "work-domain.md").write_text(rf_eng, encoding="utf-8")
 
-    # Record in DB
     with get_connection(db_path) as conn:
-        for name, path in out_files.items():
-            conn.execute(
-                """INSERT OR REPLACE INTO projections
-                   (artifact_id, target, file_path, generated_at)
-                   VALUES (?,?,?,datetime('now'))""",
-                (str(uuid.uuid4()), "claude_code", str(path)),
-            )
+        record_projections(conn, "claude_code", out_files)
 
     return out_files
 

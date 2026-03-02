@@ -145,14 +145,14 @@ def reconcile(db_path: Path = DB_PATH) -> dict:
                     "category": category,
                     "statement": statement,
                     "evidence_event_ids": [],
-                    "confidence": 1.0,
+                    "confidence": 0.5,
                     "first_seen": now,
                     "last_seen": now,
                     "ttl_class": "permanent",
                 }
             if ev_id:
                 merged[key]["evidence_event_ids"].append(ev_id)
-            # Boost confidence for repeated mentions
+            # Boost confidence for repeated mentions (caps at 1.0)
             merged[key]["confidence"] = min(1.0, merged[key]["confidence"] + 0.05)
 
         for key, fact in merged.items():

@@ -1,11 +1,10 @@
 """Parse Claude memory export markdown into events."""
 import hashlib
 import re
-import uuid
 from pathlib import Path
 
 from memory_hub.config import DB_PATH
-from memory_hub.db import get_connection, insert_event
+from memory_hub.db import get_connection, insert_event, log_ingest_start, log_ingest_complete
 
 # Matches lines like: [2024-08-23] - Some memory entry
 _DATED_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2})\]\s*-\s*(.+)$")
@@ -37,7 +36,6 @@ def ingest_claude_memory(file_path: Path, db_path: Path = DB_PATH) -> dict:
 
     text = file_path.read_text(encoding="utf-8")
     stats = {"entries_found": 0, "added": 0, "skipped": 0}
-    log_id = str(uuid.uuid4())
 
     # Strip markdown code fences if present
     lines = text.splitlines()
@@ -81,10 +79,7 @@ def ingest_claude_memory(file_path: Path, db_path: Path = DB_PATH) -> dict:
     flush()
 
     with get_connection(db_path) as conn:
-        conn.execute(
-            "INSERT INTO ingest_log (log_id, source, file_path) VALUES (?,?,?)",
-            (log_id, "claude", str(file_path)),
-        )
+        log_id = log_ingest_start(conn, "claude", str(file_path))
 
         for ts, content in entries:
             stats["entries_found"] += 1
@@ -103,10 +98,6 @@ def ingest_claude_memory(file_path: Path, db_path: Path = DB_PATH) -> dict:
             else:
                 stats["skipped"] += 1
 
-        conn.execute(
-            """UPDATE ingest_log SET events_added=?, events_skipped=?,
-               completed_at=datetime('now') WHERE log_id=?""",
-            (stats["added"], stats["skipped"], log_id),
-        )
+        log_ingest_complete(conn, log_id, stats["added"], stats["skipped"])
 
     return stats

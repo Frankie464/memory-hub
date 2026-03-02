@@ -1,5 +1,6 @@
 """SQLite database management — schema, helpers, and connection context."""
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -196,6 +197,47 @@ def get_active_facts(conn: sqlite3.Connection, category: str = None) -> list:
     return conn.execute(
         "SELECT * FROM facts WHERE active=1 ORDER BY category, confidence DESC"
     ).fetchall()
+
+
+def get_statements(facts: list, *categories: str) -> list[str]:
+    """Return statement strings from facts matching any of the given categories."""
+    return [f["statement"] for f in facts if f["category"] in categories]
+
+
+def get_active_facts_as_dicts(conn: sqlite3.Connection, category: str = None) -> list[dict]:
+    """Return active facts as plain dicts, optionally filtered by category."""
+    return [dict(f) for f in get_active_facts(conn, category)]
+
+
+def log_ingest_start(conn: sqlite3.Connection, source: str, file_path: str) -> str:
+    """Insert an ingest_log row and return its log_id."""
+    log_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO ingest_log (log_id, source, file_path) VALUES (?,?,?)",
+        (log_id, source, file_path),
+    )
+    return log_id
+
+
+def log_ingest_complete(conn: sqlite3.Connection, log_id: str, added: int, skipped: int) -> None:
+    """Mark an ingest_log row complete with counts."""
+    conn.execute(
+        """UPDATE ingest_log SET events_added=?, events_skipped=?,
+           completed_at=datetime('now') WHERE log_id=?""",
+        (added, skipped, log_id),
+    )
+
+
+def record_projections(conn: sqlite3.Connection, target: str, paths) -> None:
+    """Record generated projection files. paths may be a list or dict of Path values."""
+    file_paths = paths.values() if isinstance(paths, dict) else paths
+    for path in file_paths:
+        conn.execute(
+            """INSERT OR REPLACE INTO projections
+               (artifact_id, target, file_path, generated_at)
+               VALUES (?,?,?,datetime('now'))""",
+            (str(uuid.uuid4()), target, str(path)),
+        )
 
 
 def get_pending_conflicts(conn: sqlite3.Connection) -> list:

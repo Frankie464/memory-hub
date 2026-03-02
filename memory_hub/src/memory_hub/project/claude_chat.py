@@ -1,10 +1,9 @@
 """Generate Claude.ai memory import chunks from active facts."""
-import uuid
 from datetime import datetime
 from pathlib import Path
 
 from memory_hub.config import DB_PATH, PROFILE_MANUAL_PATH, PROJ_CLAUDE_AI, CLAUDE_AI_CHUNK_MAX
-from memory_hub.db import get_connection, get_active_facts, get_stats
+from memory_hub.db import get_connection, get_active_facts, get_stats, record_projections
 
 CHUNK_CATEGORIES = [
     ("01_identity", ["identity"], "Identity"),
@@ -97,14 +96,7 @@ def project_claude_chat(db_path: Path = DB_PATH) -> list[Path]:
                 out_path.write_text(chunk, encoding="utf-8")
                 generated_files.append(out_path)
 
-    # Record in projections table
     with get_connection(db_path) as conn:
-        for path in generated_files:
-            conn.execute(
-                """INSERT OR REPLACE INTO projections
-                   (artifact_id, target, file_path, generated_at)
-                   VALUES (?,?,?,datetime('now'))""",
-                (str(uuid.uuid4()), "claude_chat", str(path)),
-            )
+        record_projections(conn, "claude_chat", generated_files)
 
     return generated_files

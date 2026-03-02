@@ -13,6 +13,20 @@ from memory_hub.project.chatgpt import project_chatgpt
 from memory_hub.reconcile import reconcile
 
 
+def _build_report_content(profile: str, now: str, steps: list, stats: dict) -> str:
+    lines = [f"# {profile.title()} Sync Report — {now}", "", "## Steps"]
+    for step in steps:
+        lines.append(f"- {step}")
+    lines += [
+        "",
+        "## Database Stats",
+        f"- Events: {stats['events']:,}",
+        f"- Active facts: {stats['facts']}",
+        f"- Pending conflicts: {stats['pending_conflicts']}",
+    ]
+    return "\n".join(lines)
+
+
 def _write_report(profile: str, content: str) -> Path:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     date_str = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -76,22 +90,7 @@ def sync_weekly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
         stats = get_stats(conn)
     results["stats"] = stats
 
-    # Write report
-    report_lines = [
-        f"# Weekly Sync Report — {now}",
-        "",
-        "## Steps",
-    ]
-    for step in results["steps"]:
-        report_lines.append(f"- {step}")
-    report_lines += [
-        "",
-        "## Database Stats",
-        f"- Events: {stats['events']:,}",
-        f"- Active facts: {stats['facts']}",
-        f"- Pending conflicts: {stats['pending_conflicts']}",
-    ]
-    report_path = _write_report("weekly", "\n".join(report_lines))
+    report_path = _write_report("weekly", _build_report_content("weekly", now, results["steps"], stats))
     results["report_path"] = str(report_path)
     return results
 
@@ -161,20 +160,6 @@ def sync_monthly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
         stats = get_stats(conn)
     results["stats"] = stats
 
-    report_lines = [
-        f"# Monthly Sync Report — {now}",
-        "",
-        "## Steps",
-    ]
-    for step in results["steps"]:
-        report_lines.append(f"- {step}")
-    report_lines += [
-        "",
-        "## Database Stats",
-        f"- Events: {stats['events']:,}",
-        f"- Active facts: {stats['facts']}",
-        f"- Pending conflicts: {stats['pending_conflicts']}",
-    ]
-    report_path = _write_report("monthly", "\n".join(report_lines))
+    report_path = _write_report("monthly", _build_report_content("monthly", now, results["steps"], stats))
     results["report_path"] = str(report_path)
     return results

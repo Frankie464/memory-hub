@@ -1,10 +1,9 @@
 """Generate OpenClaw memory projection files."""
-import uuid
 from datetime import datetime
 from pathlib import Path
 
 from memory_hub.config import DB_PATH, PROFILE_MANUAL_PATH, PROJ_OPENCLAW
-from memory_hub.db import get_connection, get_active_facts
+from memory_hub.db import get_connection, get_active_facts_as_dicts, record_projections
 
 
 def project_openclaw(deploy: bool = False, openclaw_memory_dir: Path = None, db_path: Path = DB_PATH) -> dict[str, Path]:
@@ -18,8 +17,7 @@ def project_openclaw(deploy: bool = False, openclaw_memory_dir: Path = None, db_
     PROJ_OPENCLAW.mkdir(parents=True, exist_ok=True)
 
     with get_connection(db_path) as conn:
-        facts = get_active_facts(conn)
-    facts = [dict(f) for f in facts]
+        facts = get_active_facts_as_dicts(conn)
 
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d")
@@ -59,7 +57,7 @@ def project_openclaw(deploy: bool = False, openclaw_memory_dir: Path = None, db_
         manual_text = PROFILE_MANUAL_PATH.read_text(encoding="utf-8")
         # Add any lines not already in memory_lines
         for line in manual_text.splitlines():
-            if line.startswith("- ") and line[2:] not in "\n".join(memory_lines):
+            if line.startswith("- ") and line not in memory_lines:
                 memory_lines.append(line)
         memory_lines.append("")
 
@@ -89,12 +87,6 @@ def project_openclaw(deploy: bool = False, openclaw_memory_dir: Path = None, db_
         (dated_dir / f"{date_str}.md").write_text(daily_content, encoding="utf-8")
 
     with get_connection(db_path) as conn:
-        for name, path in out_files.items():
-            conn.execute(
-                """INSERT OR REPLACE INTO projections
-                   (artifact_id, target, file_path, generated_at)
-                   VALUES (?,?,?,datetime('now'))""",
-                (str(uuid.uuid4()), "openclaw", str(path)),
-            )
+        record_projections(conn, "openclaw", out_files)
 
     return out_files

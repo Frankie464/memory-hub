@@ -1,13 +1,12 @@
 """Parse ChatGPT conversations.json export into events."""
 import hashlib
 import json
-import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 from memory_hub.config import DB_PATH, RAW_DIR
-from memory_hub.db import get_connection, insert_event
+from memory_hub.db import get_connection, insert_event, log_ingest_start, log_ingest_complete
 
 
 def _event_id(conversation_id: str, message_id: str) -> str:
@@ -40,7 +39,6 @@ def ingest_chatgpt_zip(zip_path: Path, db_path: Path = DB_PATH) -> dict:
 
     Returns stats dict: {conversations, messages_added, messages_skipped}
     """
-    zip_path = Path(zip_path)
     if not zip_path.exists():
         raise FileNotFoundError(f"Export ZIP not found: {zip_path}")
 
@@ -54,13 +52,9 @@ def ingest_chatgpt_zip(zip_path: Path, db_path: Path = DB_PATH) -> dict:
             conversations = json.load(f)
 
     stats = {"conversations": 0, "messages_added": 0, "messages_skipped": 0}
-    log_id = str(uuid.uuid4())
 
     with get_connection(db_path) as conn:
-        conn.execute(
-            "INSERT INTO ingest_log (log_id, source, file_path) VALUES (?,?,?)",
-            (log_id, "chatgpt", str(zip_path)),
-        )
+        log_id = log_ingest_start(conn, "chatgpt", str(zip_path))
 
         for conv in conversations:
             conv_id = conv.get("id", "")
@@ -102,10 +96,6 @@ def ingest_chatgpt_zip(zip_path: Path, db_path: Path = DB_PATH) -> dict:
                 else:
                     stats["messages_skipped"] += 1
 
-        conn.execute(
-            """UPDATE ingest_log SET events_added=?, events_skipped=?,
-               completed_at=datetime('now') WHERE log_id=?""",
-            (stats["messages_added"], stats["messages_skipped"], log_id),
-        )
+        log_ingest_complete(conn, log_id, stats["messages_added"], stats["messages_skipped"])
 
     return stats
