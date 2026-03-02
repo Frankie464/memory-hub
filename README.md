@@ -8,18 +8,19 @@ Local cross-AI memory management system. Ingests conversation history from ChatG
 ## Quick Start
 
 ```bash
-git clone <this-repo-url>
-cd ChatGPT_Claude/memory_hub
+git clone https://github.com/YOUR_USERNAME/memory-hub.git
+cd memory-hub/memory_hub
 pip install -e .
 hub init
 hub gui          # Opens dashboard at http://localhost:8501
 ```
 
+Or just double-click `launch.bat` (Windows) / run `./launch.sh` (Mac/Linux) after install.
+
 ## Requirements
 
 - Python 3.10+
 - pip
-- (Optional) `gh` CLI for GitHub repo creation
 
 ## What It Does
 
@@ -34,9 +35,31 @@ hub gui          # Opens dashboard at http://localhost:8501
 1. Clone the repo
 2. `cd memory_hub && pip install -e .`
 3. `hub init` — creates `data/` directories and SQLite database
-4. `hub gui` — opens the dashboard with a guided Setup Wizard
+4. Double-click `launch.bat` or run `hub gui` — opens the dashboard with a guided Setup Wizard
 
-The Setup Wizard walks you through importing your data step by step.
+The Setup Wizard walks you through everything step by step (import data, build profile, deploy to platforms).
+
+## Launching the Dashboard
+
+**Easiest:** Double-click `launch.bat` (Windows) or run `./launch.sh` (Mac/Linux). Opens at http://localhost:8501.
+
+**From terminal:** `hub gui`
+
+**Create a desktop shortcut (Windows):** Right-click `launch.bat` -> Send to -> Desktop (create shortcut). Rename it to "memory-hub". You can also pin it to your taskbar.
+
+---
+
+## When Your ChatGPT Export Arrives
+
+1. Download the ZIP from the email link
+2. Either:
+   - **GUI:** Open the dashboard -> Setup Wizard -> Step 4, upload the ZIP
+   - **CLI:** Copy the ZIP to `data/raw/chatgpt_exports/` then run:
+     ```bash
+     hub ingest chatgpt --zip data/raw/chatgpt_exports/your_export.zip
+     hub reconcile
+     ```
+3. Generate updated projections: `hub project chatgpt` (and any other platforms you want)
 
 ---
 
@@ -130,6 +153,39 @@ This generates three files in `data/projections/chatgpt/`:
 | `hub sync --profile weekly` | Run weekly sync workflow |
 | `hub sync --profile monthly` | Run monthly sync workflow |
 | `hub status` | Show database stats and projection status |
+
+## How Sync Works
+
+The sync system keeps all your AIs up to date with a single command. Here's the data flow:
+
+```
+Export from AI  ->  Ingest  ->  Reconcile  ->  Project  ->  Deploy
+(ZIP or .md)     (parse +     (extract      (generate     (write to
+                  store)       facts)        per-platform)  platform)
+```
+
+**Weekly sync** (`hub sync --profile weekly`):
+1. Auto-finds the latest Claude memory export in `data/raw/claude_exports/`
+2. Ingests it (skips duplicates)
+3. Runs reconcile to extract/update facts
+4. Generates projections for Claude.ai, Claude Code, and OpenClaw
+5. Writes a timestamped report to `reports/`
+
+**Monthly sync** (`hub sync --profile monthly`):
+1. Auto-finds the latest ChatGPT ZIP in `data/raw/chatgpt_exports/`
+2. Also ingests latest Claude export
+3. Reconciles everything
+4. Generates projections for ALL platforms (including ChatGPT)
+5. Writes a report
+
+**To run manually:**
+```bash
+hub sync --profile weekly           # Quick sync (Claude + reconcile + 3 projections)
+hub sync --profile monthly          # Full sync (ChatGPT + Claude + all projections)
+hub sync --profile weekly --deploy  # Sync AND deploy to platform locations
+```
+
+**To automate:** See the Task Scheduler section below.
 
 ## Automation (Windows Task Scheduler)
 
