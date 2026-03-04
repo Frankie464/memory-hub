@@ -15,7 +15,7 @@ from memory_hub.config import CANONICAL_DIR, DB_PATH, RAW_DIR, REPORTS_DIR
 WATCHER_STATE_PATH = CANONICAL_DIR / "watcher_state.json"
 ARCHIVE_DIR = RAW_DIR / "archive"
 DOWNLOADS_DIR = Path.home() / "Downloads"
-POLL_INTERVAL_SECONDS = 300  # 5 minutes default
+POLL_INTERVAL_SECONDS = 604800  # 1 week default
 
 # Patterns for auto-detecting exports in ~/Downloads
 DOWNLOADS_PATTERNS = [

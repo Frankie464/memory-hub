@@ -382,8 +382,8 @@ def sync(profile: str, deploy: bool, db_path: Path):
 # ── hub watch ─────────────────────────────────────────────────────────────────
 
 @cli.command()
-@click.option("--interval", default=300, show_default=True,
-              help="Poll interval in seconds")
+@click.option("--interval", default=604800, show_default=True,
+              help="Poll interval in seconds (default: 1 week)")
 @click.option("--once", is_flag=True, default=False,
               help="Run a single scan pass and exit (for cron / OpenClaw heartbeat)")
 @click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)

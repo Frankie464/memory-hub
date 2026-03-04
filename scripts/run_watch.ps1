@@ -4,7 +4,7 @@
 # Usage:
 #   powershell -File scripts\run_watch.ps1
 #
-# Task Scheduler: trigger every 30 minutes, action = powershell.exe -File <this_script>
+# Task Scheduler: trigger weekly, action = powershell.exe -File <this_script>
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
