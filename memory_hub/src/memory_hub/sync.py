@@ -7,6 +7,7 @@ from memory_hub.db import get_connection, get_stats
 from memory_hub.ingest.chatgpt import ingest_chatgpt_zip
 from memory_hub.ingest.chatgpt_memory import ingest_chatgpt_memory
 from memory_hub.ingest.claude import ingest_claude_zip
+from memory_hub.ingest.github import ingest_github
 from memory_hub.project.claude_chat import project_claude_chat
 from memory_hub.project.claude_code import project_claude_code
 from memory_hub.project.openclaw import project_openclaw
@@ -79,7 +80,17 @@ def sync_weekly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
     else:
         results["steps"].append("⚠ No Claude export found in data/raw/claude_exports/")
 
-    # Step 3: Reconcile
+    # Step 3: Ingest GitHub repos (if gh is authenticated)
+    try:
+        gh_stats = ingest_github(db_path=db_path)
+        results["steps"].append(
+            f"✓ GitHub ingest: {gh_stats['repos_found']} repos, "
+            f"{gh_stats['events_added']:,} events added"
+        )
+    except Exception as e:
+        results["steps"].append(f"⚠ GitHub ingest skipped: {e}")
+
+    # Step 4: Reconcile
     try:
         rec = reconcile(db_path)
         results["steps"].append(
@@ -88,7 +99,7 @@ def sync_weekly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
     except Exception as e:
         results["steps"].append(f"✗ Reconcile failed: {e}")
 
-    # Step 3: Generate projections
+    # Step 5: Generate projections
     for name, fn, kwargs in [
         ("Claude.ai", project_claude_chat, {"db_path": db_path}),
         ("Claude Code", project_claude_code, {"deploy": deploy, "db_path": db_path}),
@@ -163,7 +174,17 @@ def sync_monthly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
     else:
         results["steps"].append("⚠ No Claude export found in data/raw/claude_exports/")
 
-    # Step 4: Reconcile
+    # Step 4: Ingest GitHub repos (if gh is authenticated)
+    try:
+        gh_stats = ingest_github(db_path=db_path)
+        results["steps"].append(
+            f"✓ GitHub ingest: {gh_stats['repos_found']} repos, "
+            f"{gh_stats['events_added']:,} events added"
+        )
+    except Exception as e:
+        results["steps"].append(f"⚠ GitHub ingest skipped: {e}")
+
+    # Step 5: Reconcile
     try:
         rec = reconcile(db_path)
         results["steps"].append(
@@ -172,7 +193,7 @@ def sync_monthly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
     except Exception as e:
         results["steps"].append(f"✗ Reconcile failed: {e}")
 
-    # Step 5: All projections
+    # Step 6: All projections
     for name, fn, kwargs in [
         ("Claude.ai", project_claude_chat, {"db_path": db_path}),
         ("Claude Code", project_claude_code, {"deploy": deploy, "db_path": db_path}),

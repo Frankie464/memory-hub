@@ -422,6 +422,36 @@ This imports both conversations and Claude's stored memories about you.
         else:
             st.info("No ZIP files found in `data/raw/claude_exports/`. Upload one above or export from claude.ai.")
 
+    # ── Step 5b: GitHub + Claude Code (optional) ─────────────────────────
+    with st.expander("🐙 Step 5b — Connect GitHub & Claude Code (optional)", expanded=False):
+        st.markdown("""
+**GitHub:** If you use GitHub, authenticate `gh` CLI to import repo metadata and READMEs as context.
+
+```
+gh auth login
+```
+
+**Claude Code:** If you use Claude Code CLI, you can import session logs from `~/.claude/projects/`.
+
+Use the **Ingest Data** page tabs for full controls.
+""")
+        if st.button("⚡ Quick Ingest: GitHub + Claude Code", key="dev_ingest_wiz"):
+            _require_db()
+            results_lines = []
+            try:
+                from memory_hub.ingest.github import ingest_github
+                s = ingest_github(db_path=DB_PATH)
+                results_lines.append(f"  GitHub: {s['repos_found']} repos, {s['events_added']:,} events added")
+            except Exception as e:
+                results_lines.append(f"  GitHub: skipped ({e})")
+            try:
+                from memory_hub.ingest.claude_code import ingest_claude_code
+                s = ingest_claude_code(db_path=DB_PATH)
+                results_lines.append(f"  Claude Code: {s['sessions_found']} sessions, {s['messages_added']:,} messages added")
+            except Exception as e:
+                results_lines.append(f"  Claude Code: skipped ({e})")
+            st.success("Done!\n" + "\n".join(results_lines))
+
     # ── Step 6: Build profile ──────────────────────────────────────────────
     with st.expander("🔬 Step 6 — Build your memory profile", expanded=_db_ready() and not PROFILE_GENERATED_PATH.exists()):
         st.markdown("""
@@ -477,7 +507,10 @@ elif page == "📥 Ingest Data":
     st.title("📥 Ingest Data")
     _require_db()
 
-    tab_cg, tab_cl, tab_claude = st.tabs(["💬 ChatGPT Conversations", "💬 ChatGPT Memories", "🟣 Claude Export"])
+    tab_cg, tab_cl, tab_claude, tab_gh, tab_cc = st.tabs([
+        "💬 ChatGPT Conversations", "💬 ChatGPT Memories", "🟣 Claude Export",
+        "🐙 GitHub", "🖥️ Claude Code",
+    ])
 
     with tab_cg:
         st.subheader("ChatGPT Export Ingest")
@@ -615,6 +648,95 @@ Upload the file or drop it into `data/raw/claude_exports/`.
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.caption("No Claude ingests yet.")
+
+    # ── Tab: GitHub ───────────────────────────────────────────────────────
+    with tab_gh:
+        st.subheader("GitHub Repos & READMEs")
+        st.markdown("""
+Ingests repo metadata (name, description, languages) and README content from your GitHub account.
+Requires `gh` CLI to be authenticated (`gh auth login`).
+Repo summaries are synthesized into natural-language events for fact extraction.
+""")
+        # Check gh auth status
+        import subprocess
+        gh_user = None
+        try:
+            result = subprocess.run(
+                ["gh", "api", "user", "--jq", ".login"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                gh_user = result.stdout.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        if gh_user:
+            st.success(f"Authenticated as **{gh_user}**")
+            if st.button("Ingest GitHub Repos", type="primary", key="gh_ingest"):
+                from memory_hub.ingest.github import ingest_github
+                with st.spinner("Fetching repos and READMEs from GitHub API..."):
+                    s = ingest_github(gh_user, DB_PATH)
+                st.success(
+                    f"✅ {s['repos_found']} repos, {s['readmes_fetched']} READMEs — "
+                    f"{s['events_added']:,} events added, {s['events_skipped']:,} skipped"
+                )
+        else:
+            st.warning("GitHub CLI not authenticated. Run `gh auth login` in your terminal first.")
+
+        st.markdown("---")
+        st.markdown("**Past GitHub ingests:**")
+        with get_connection(DB_PATH) as conn:
+            logs = conn.execute(
+                "SELECT file_path, events_added, events_skipped, completed_at "
+                "FROM ingest_log WHERE source='github' ORDER BY started_at DESC LIMIT 10"
+            ).fetchall()
+        if logs:
+            import pandas as pd
+            df = pd.DataFrame([dict(r) for r in logs])
+            df.columns = ["Source", "Added", "Skipped", "Completed"]
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.caption("No GitHub ingests yet.")
+
+    # ── Tab: Claude Code ──────────────────────────────────────────────────
+    with tab_cc:
+        st.subheader("Claude Code CLI Sessions")
+        from memory_hub.ingest.claude_code import CLAUDE_CODE_PROJECTS_DIR
+        st.markdown(f"""
+Ingests session JSONL files from `{CLAUDE_CODE_PROJECTS_DIR}`.
+Only user and assistant messages are imported. Thinking blocks and tool calls are skipped.
+Re-ingesting is safe — duplicate messages are skipped automatically.
+""")
+        cc_exists = CLAUDE_CODE_PROJECTS_DIR.exists()
+        if cc_exists:
+            jsonl_count = len(list(CLAUDE_CODE_PROJECTS_DIR.rglob("*.jsonl")))
+            st.info(f"Found {jsonl_count} JSONL session files across all projects.")
+        else:
+            st.warning(f"`{CLAUDE_CODE_PROJECTS_DIR}` not found. Install Claude Code CLI first.")
+
+        if st.button("Ingest Claude Code Sessions", type="primary", key="cc_ingest", disabled=not cc_exists):
+            from memory_hub.ingest.claude_code import ingest_claude_code
+            with st.spinner("Scanning session files..."):
+                s = ingest_claude_code(db_path=DB_PATH)
+            st.success(
+                f"✅ {s['files_found']} files, {s['sessions_found']} sessions — "
+                f"{s['messages_added']:,} messages added, {s['messages_skipped']:,} skipped"
+            )
+
+        st.markdown("---")
+        st.markdown("**Past Claude Code ingests:**")
+        with get_connection(DB_PATH) as conn:
+            logs = conn.execute(
+                "SELECT file_path, events_added, events_skipped, completed_at "
+                "FROM ingest_log WHERE source='claude_code' ORDER BY started_at DESC LIMIT 10"
+            ).fetchall()
+        if logs:
+            import pandas as pd
+            df = pd.DataFrame([dict(r) for r in logs])
+            df.columns = ["Directory", "Added", "Skipped", "Completed"]
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.caption("No Claude Code ingests yet.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

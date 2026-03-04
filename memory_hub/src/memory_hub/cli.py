@@ -173,6 +173,47 @@ def ingest_claude(zip_path: Path, db_path: Path):
         )
 
 
+@ingest.command("github")
+@click.option("--username", default=None, help="GitHub username (auto-detected if omitted)")
+@click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)
+def ingest_github(username: str, db_path: Path):
+    """Ingest GitHub repo metadata and READMEs via gh CLI."""
+    from memory_hub.ingest.github import ingest_github as do_ingest
+    _db = db_path or DB_PATH
+    console.print("[bold]Ingesting GitHub repos...[/bold]")
+    try:
+        with console.status("Fetching repos and READMEs from GitHub API..."):
+            stats = do_ingest(username, _db)
+        console.print(
+            f"  [green]OK[/green] {stats['repos_found']} repos found, "
+            f"{stats['readmes_fetched']} READMEs fetched, "
+            f"{stats['events_added']:,} events added, "
+            f"{stats['events_skipped']:,} skipped"
+        )
+    except RuntimeError as e:
+        console.print(f"  [red]Error:[/red] {e}")
+        sys.exit(1)
+
+
+@ingest.command("claude-code")
+@click.option("--dir", "projects_dir", type=click.Path(path_type=Path), default=None,
+              help="Path to Claude Code projects dir (default: ~/.claude/projects/)")
+@click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)
+def ingest_claude_code_cmd(projects_dir: Path, db_path: Path):
+    """Ingest Claude Code CLI session logs from ~/.claude/projects/."""
+    from memory_hub.ingest.claude_code import ingest_claude_code
+    _db = db_path or DB_PATH
+    console.print("[bold]Ingesting Claude Code sessions...[/bold]")
+    with console.status("Scanning JSONL session files..."):
+        stats = ingest_claude_code(projects_dir, _db)
+    console.print(
+        f"  [green]OK[/green] {stats['files_found']} files, "
+        f"{stats['sessions_found']} sessions, "
+        f"{stats['messages_added']:,} messages added, "
+        f"{stats['messages_skipped']:,} skipped"
+    )
+
+
 # ── hub reconcile ─────────────────────────────────────────────────────────────
 
 @cli.command()

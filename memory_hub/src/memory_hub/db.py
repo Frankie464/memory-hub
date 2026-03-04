@@ -13,7 +13,7 @@ PRAGMA foreign_keys=ON;
 
 CREATE TABLE IF NOT EXISTS events (
     event_id TEXT PRIMARY KEY,
-    source TEXT NOT NULL CHECK(source IN ('chatgpt','claude','openclaw')),
+    source TEXT NOT NULL CHECK(source IN ('chatgpt','claude','openclaw','claude_code','github','gemini')),
     timestamp_utc TEXT,
     role TEXT,
     content TEXT NOT NULL,
@@ -147,6 +147,49 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             "WHERE source='claude' AND file_path LIKE '%.md'"
         )
         conn.execute("PRAGMA user_version = 1")
+
+    if version < 2:
+        # v2: Expand source CHECK constraint to include claude_code, github, gemini.
+        # SQLite cannot ALTER CHECK constraints; must recreate the table.
+        conn.executescript("""
+            CREATE TABLE events_new (
+                event_id TEXT PRIMARY KEY,
+                source TEXT NOT NULL CHECK(source IN (
+                    'chatgpt','claude','openclaw','claude_code','github','gemini'
+                )),
+                timestamp_utc TEXT,
+                role TEXT,
+                content TEXT NOT NULL,
+                conversation_id TEXT,
+                conversation_title TEXT,
+                topic_tags TEXT DEFAULT '[]',
+                ingested_at TEXT DEFAULT (datetime('now'))
+            );
+            INSERT INTO events_new SELECT * FROM events;
+            DROP TABLE events;
+            ALTER TABLE events_new RENAME TO events;
+
+            DROP TRIGGER IF EXISTS events_ai;
+            DROP TRIGGER IF EXISTS events_au;
+            DROP TRIGGER IF EXISTS events_ad;
+
+            CREATE TRIGGER events_ai AFTER INSERT ON events BEGIN
+                INSERT INTO events_fts(rowid, content, conversation_title, topic_tags)
+                VALUES (new.rowid, new.content, new.conversation_title, new.topic_tags);
+            END;
+            CREATE TRIGGER events_au AFTER UPDATE ON events BEGIN
+                INSERT INTO events_fts(events_fts, rowid, content, conversation_title, topic_tags)
+                VALUES ('delete', old.rowid, old.content, old.conversation_title, old.topic_tags);
+                INSERT INTO events_fts(rowid, content, conversation_title, topic_tags)
+                VALUES (new.rowid, new.content, new.conversation_title, new.topic_tags);
+            END;
+            CREATE TRIGGER events_ad AFTER DELETE ON events BEGIN
+                INSERT INTO events_fts(events_fts, rowid, content, conversation_title, topic_tags)
+                VALUES ('delete', old.rowid, old.content, old.conversation_title, old.topic_tags);
+            END;
+
+            PRAGMA user_version = 2;
+        """)
 
 
 @contextmanager

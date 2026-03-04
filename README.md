@@ -24,7 +24,7 @@ Or just double-click `launch.bat` (Windows) / run `./launch.sh` (Mac/Linux) afte
 
 ## What It Does
 
-1. **Ingest** raw exports from ChatGPT (ZIP + memory dump), Claude (ZIP or folder), and OpenClaw
+1. **Ingest** raw exports from ChatGPT (ZIP + memory dump), Claude (ZIP or folder), GitHub (API), Claude Code (local JSONL), and OpenClaw
 2. **Reconcile** — extract facts (identity, preferences, work, interests, relationships, financial, lifestyle) using pattern matching
 3. **Project** — generate platform-specific memory files for each AI
 4. **Deploy** — optionally write projections to each platform's actual config location
@@ -92,6 +92,27 @@ hub reconcile
 ```
 
 This ingests all conversations (messages) and stored memories from your Claude account.
+
+### GitHub Repos
+
+**Connect your GitHub account:**
+```bash
+gh auth login                      # One-time setup
+hub ingest github                  # Fetches repo metadata + READMEs
+hub reconcile
+```
+
+This synthesizes natural-language events from your repo descriptions, languages, and README content so the reconcile pipeline can extract facts about your tech stack and projects. Works across machines (no local files needed).
+
+### Claude Code Sessions (Optional)
+
+**Import local Claude Code CLI session logs:**
+```bash
+hub ingest claude-code             # Scans ~/.claude/projects/*.jsonl
+hub reconcile
+```
+
+This ingests user/assistant messages from Claude Code CLI sessions. Thinking blocks and tool calls are skipped. This is machine-specific (not included in sync workflows).
 
 ### Claude.ai (Web Chat)
 
@@ -162,6 +183,8 @@ This generates three files in `data/projections/chatgpt/`:
 | `hub ingest chatgpt --zip <path>` | Ingest ChatGPT export ZIP |
 | `hub ingest chatgpt-memory --file <path>` | Ingest ChatGPT memory dump |
 | `hub ingest claude --zip <path>` | Ingest Claude export (ZIP or folder) |
+| `hub ingest github [--username NAME]` | Ingest GitHub repos via `gh` CLI |
+| `hub ingest claude-code [--dir PATH]` | Ingest Claude Code session logs |
 | `hub reconcile` | Extract facts from events, detect conflicts |
 | `hub project claude-chat` | Generate Claude.ai memory import chunks |
 | `hub project claude-code [--deploy]` | Generate/deploy Claude Code files |
@@ -185,18 +208,20 @@ Export from AI  ->  Ingest  ->  Reconcile  ->  Project  ->  Deploy
 **Weekly sync** (`hub sync --profile weekly`):
 1. Auto-finds the latest ChatGPT memory dump (`.md`) in `data/raw/chatgpt_exports/`
 2. Auto-finds the latest Claude export (`.zip`) in `data/raw/claude_exports/`
-3. Ingests both (skips duplicates)
-4. Runs reconcile to extract/update facts
-5. Generates projections for Claude.ai, Claude Code, and OpenClaw
-6. Writes a timestamped report to `reports/`
+3. Fetches GitHub repo metadata and READMEs (if `gh` is authenticated)
+4. Ingests all (skips duplicates)
+5. Runs reconcile to extract/update facts
+6. Generates projections for Claude.ai, Claude Code, and OpenClaw
+7. Writes a timestamped report to `reports/`
 
 **Monthly sync** (`hub sync --profile monthly`):
 1. Auto-finds the latest ChatGPT conversation ZIP in `data/raw/chatgpt_exports/`
 2. Also ingests latest ChatGPT memory dump (if available)
 3. Auto-finds the latest Claude export in `data/raw/claude_exports/`
-4. Reconciles everything
-5. Generates projections for ALL platforms (including ChatGPT)
-6. Writes a report
+4. Fetches GitHub repo metadata and READMEs (if `gh` is authenticated)
+5. Reconciles everything
+6. Generates projections for ALL platforms (including ChatGPT)
+7. Writes a report
 
 **To run manually:**
 ```bash
