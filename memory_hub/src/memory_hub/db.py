@@ -251,6 +251,9 @@ def upsert_fact(conn: sqlite3.Connection, fact: dict) -> str:
 
 def search_events(conn: sqlite3.Connection, query: str, limit: int = 20) -> list:
     """Full-text search over events. Returns list of Row objects."""
+    # Wrap in double quotes for phrase matching — prevents FTS5 treating
+    # hyphens, colons, etc. as operators. Escape existing double quotes.
+    fts_query = '"' + query.replace('"', '""') + '"'
     rows = conn.execute(
         """SELECT e.event_id, e.source, e.timestamp_utc, e.conversation_title,
                   snippet(events_fts, 0, '<b>', '</b>', '...', 30) AS snippet
@@ -259,7 +262,7 @@ def search_events(conn: sqlite3.Connection, query: str, limit: int = 20) -> list
            WHERE events_fts MATCH ?
            ORDER BY rank
            LIMIT ?""",
-        (query, limit),
+        (fts_query, limit),
     ).fetchall()
     return rows
 
