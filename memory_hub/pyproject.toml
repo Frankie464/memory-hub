@@ -7,10 +7,12 @@ dependencies = [
     "rich>=13.0",
     "streamlit>=1.40",
     "pandas>=1.4",
+    "mcp>=1.0",
 ]
 
 [project.scripts]
 hub = "memory_hub.cli:cli"
+hub-mcp = "memory_hub.mcp_server:main_sync"
 
 [build-system]
 requires = ["setuptools>=68.0"]

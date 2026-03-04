@@ -38,6 +38,12 @@ def _map_role(sender: str) -> str:
     return {"human": "user", "assistant": "assistant"}.get(sender, sender or "unknown")
 
 
+def _safe_zip_member(name: str) -> bool:
+    """Return True if the ZIP member path is safe (no path traversal)."""
+    norm = Path(name).as_posix()
+    return ".." not in norm and not norm.startswith("/")
+
+
 def _load_json(source_path: Path, filename: str):
     """Load a JSON file from a ZIP or directory."""
     if source_path.is_dir():
@@ -45,9 +51,10 @@ def _load_json(source_path: Path, filename: str):
         if target.exists():
             return json.loads(target.read_text(encoding="utf-8"))
         return None
-    # ZIP file
+    # ZIP file (with zip-slip protection)
     with zipfile.ZipFile(source_path) as zf:
-        match = next((n for n in zf.namelist() if n.endswith(filename)), None)
+        safe_names = [n for n in zf.namelist() if _safe_zip_member(n)]
+        match = next((n for n in safe_names if n.endswith(filename)), None)
         if match:
             with zf.open(match) as f:
                 return json.load(f)

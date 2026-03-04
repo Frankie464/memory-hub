@@ -11,7 +11,7 @@ from memory_hub.config import (
     PROFILE_MANUAL_PATH,
     PROJ_CLAUDE_CODE,
 )
-from memory_hub.db import get_connection, get_active_facts_as_dicts, get_statements, record_projections
+from memory_hub.db import get_connection, get_active_facts_as_dicts, get_statements, record_projections, sanitize_statement
 
 
 def _build_claude_md_block(facts: list) -> str:

@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 from memory_hub.config import DB_PATH, PROFILE_MANUAL_PATH, PROJ_OPENCLAW
-from memory_hub.db import get_connection, get_active_facts_as_dicts, record_projections
+from memory_hub.db import get_connection, get_active_facts_as_dicts, record_projections, sanitize_statement
 
 
 def project_openclaw(deploy: bool = False, openclaw_memory_dir: Path = None, db_path: Path = DB_PATH) -> dict[str, Path]:
@@ -40,7 +40,7 @@ def project_openclaw(deploy: bool = False, openclaw_memory_dir: Path = None, db_
     ]
 
     for cat_key, cat_label in categories:
-        stmts = [f["statement"] for f in facts if f["category"] == cat_key]
+        stmts = [sanitize_statement(f["statement"]) for f in facts if f["category"] == cat_key]
         if stmts:
             memory_lines.append(f"## {cat_label}")
             for s in stmts:

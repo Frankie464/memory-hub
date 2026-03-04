@@ -379,6 +379,39 @@ def sync(profile: str, deploy: bool, db_path: Path):
     console.print(f"\n[dim]Report: {results.get('report_path', '')}[/dim]")
 
 
+# ── hub watch ─────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--interval", default=300, show_default=True,
+              help="Poll interval in seconds")
+@click.option("--once", is_flag=True, default=False,
+              help="Run a single scan pass and exit (for cron / OpenClaw heartbeat)")
+@click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)
+def watch(interval: int, once: bool, db_path: Path):
+    """Watch for new exports and auto-ingest them."""
+    from memory_hub.watcher import scan_once, watch_loop
+    _db = db_path or DB_PATH
+    if once:
+        console.print("[bold]Running single scan pass...[/bold]")
+        result = scan_once(_db)
+        for e in result["events"]:
+            console.print(f"  {e}")
+        if not result["events"]:
+            console.print("[dim]No new files found.[/dim]")
+        if result["reminders"]:
+            console.print("\n[bold yellow]Reminders:[/bold yellow]")
+            for r in result["reminders"]:
+                console.print(f"  [yellow]![/yellow] {r}")
+    else:
+        console.print(f"[bold cyan]Watching for new exports (interval: {interval}s)...[/bold cyan]")
+        console.print("[dim]Monitors ~/Downloads + data/raw/ directories[/dim]")
+        console.print("[dim]Press Ctrl+C to stop[/dim]")
+        try:
+            watch_loop(interval, _db)
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Watcher stopped.[/yellow]")
+
+
 # ── hub status ────────────────────────────────────────────────────────────────
 
 @cli.command()

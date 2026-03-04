@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from memory_hub.config import DB_PATH, PROFILE_GENERATED_PATH, PROFILE_MANUAL_PATH
-from memory_hub.db import get_connection, get_active_facts, upsert_fact
+from memory_hub.db import get_connection, get_active_facts, sanitize_statement, upsert_fact
 
 # ── Pattern definitions ────────────────────────────────────────────────────────
 
@@ -128,7 +128,9 @@ def reconcile(db_path: Path = DB_PATH) -> dict:
                             statement = template.format(m.group(1).strip())
                         else:
                             statement = template
-                        candidate_statements.append((category, statement, ev_id))
+                        statement = sanitize_statement(statement)
+                        if statement:
+                            candidate_statements.append((category, statement, ev_id))
 
         # Frequency-based topic interests from ALL events
         topic_interests = _detect_topic_interests(events)

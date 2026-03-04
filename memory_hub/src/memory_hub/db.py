@@ -1,5 +1,6 @@
 """SQLite database management — schema, helpers, and connection context."""
 import hashlib
+import re
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -209,6 +210,18 @@ def get_connection(db_path: Path = DB_PATH):
         conn.close()
 
 
+@contextmanager
+def get_ro_connection(db_path: Path = DB_PATH):
+    """Read-only connection via SQLite URI mode. Any write raises OperationalError."""
+    uri = f"file:{db_path}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 def insert_event(conn: sqlite3.Connection, event: dict) -> bool:
     """Insert an event, skipping duplicates. Returns True if inserted."""
     try:
@@ -249,22 +262,42 @@ def upsert_fact(conn: sqlite3.Connection, fact: dict) -> str:
         return "inserted"
 
 
+_COMMENT_RE = re.compile(r'<!--.*?-->', re.DOTALL)
+_MARKER_RE = re.compile(r'(BEGIN|END)\s+MEMORY_HUB', re.IGNORECASE)
+
+
+def sanitize_statement(s: str) -> str:
+    """Strip HTML comment delimiters and MEMORY_HUB markers from fact text."""
+    s = _COMMENT_RE.sub('', s)
+    s = _MARKER_RE.sub('', s)
+    return s.strip()
+
+
+def _sanitize_fts_query(query: str) -> str:
+    """Sanitize user input for FTS5 MATCH — wrap in quotes for safe phrase search."""
+    cleaned = re.sub(r'["\*\(\)\:\^]', '', query).strip()
+    if not cleaned:
+        return '""'
+    return f'"{cleaned}"'
+
+
 def search_events(conn: sqlite3.Connection, query: str, limit: int = 20) -> list:
     """Full-text search over events. Returns list of Row objects."""
-    # Wrap in double quotes for phrase matching — prevents FTS5 treating
-    # hyphens, colons, etc. as operators. Escape existing double quotes.
-    fts_query = '"' + query.replace('"', '""') + '"'
-    rows = conn.execute(
-        """SELECT e.event_id, e.source, e.timestamp_utc, e.conversation_title,
-                  snippet(events_fts, 0, '<b>', '</b>', '...', 30) AS snippet
-           FROM events_fts
-           JOIN events e ON e.rowid = events_fts.rowid
-           WHERE events_fts MATCH ?
-           ORDER BY rank
-           LIMIT ?""",
-        (fts_query, limit),
-    ).fetchall()
-    return rows
+    fts_query = _sanitize_fts_query(query)
+    try:
+        rows = conn.execute(
+            """SELECT e.event_id, e.source, e.timestamp_utc, e.conversation_title,
+                      snippet(events_fts, 0, '<b>', '</b>', '...', 30) AS snippet
+               FROM events_fts
+               JOIN events e ON e.rowid = events_fts.rowid
+               WHERE events_fts MATCH ?
+               ORDER BY rank
+               LIMIT ?""",
+            (fts_query, limit),
+        ).fetchall()
+        return rows
+    except sqlite3.OperationalError:
+        return []
 
 
 def get_active_facts(conn: sqlite3.Connection, category: str = None) -> list:
@@ -280,8 +313,8 @@ def get_active_facts(conn: sqlite3.Connection, category: str = None) -> list:
 
 
 def get_statements(facts: list, *categories: str) -> list[str]:
-    """Return statement strings from facts matching any of the given categories."""
-    return [f["statement"] for f in facts if f["category"] in categories]
+    """Return sanitized statement strings from facts matching any of the given categories."""
+    return [sanitize_statement(f["statement"]) for f in facts if f["category"] in categories]
 
 
 def get_active_facts_as_dicts(conn: sqlite3.Connection, category: str = None) -> list[dict]:

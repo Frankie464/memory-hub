@@ -33,6 +33,12 @@ def _extract_text(content: dict) -> str:
     return content.get("text", "")
 
 
+def _safe_zip_member(name: str) -> bool:
+    """Return True if the ZIP member path is safe (no path traversal)."""
+    norm = Path(name).as_posix()
+    return ".." not in norm and not norm.startswith("/")
+
+
 def ingest_chatgpt_zip(zip_path: Path, db_path: Path = DB_PATH) -> dict:
     """
     Parse a ChatGPT export ZIP file and insert events into the DB.
@@ -42,9 +48,9 @@ def ingest_chatgpt_zip(zip_path: Path, db_path: Path = DB_PATH) -> dict:
     if not zip_path.exists():
         raise FileNotFoundError(f"Export ZIP not found: {zip_path}")
 
-    # Extract conversations.json
+    # Extract conversations.json (with zip-slip protection)
     with zipfile.ZipFile(zip_path) as zf:
-        names = zf.namelist()
+        names = [n for n in zf.namelist() if _safe_zip_member(n)]
         conv_file = next((n for n in names if n.endswith("conversations.json")), None)
         if not conv_file:
             raise ValueError("No conversations.json found in ZIP")
