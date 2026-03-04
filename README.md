@@ -24,7 +24,7 @@ Or just double-click `launch.bat` (Windows) / run `./launch.sh` (Mac/Linux) afte
 
 ## What It Does
 
-1. **Ingest** raw exports from ChatGPT (ZIP), Claude (memory export .md), and OpenClaw
+1. **Ingest** raw exports from ChatGPT (ZIP + memory dump), Claude (ZIP or folder), and OpenClaw
 2. **Reconcile** — extract facts (identity, preferences, work, interests, relationships, financial, lifestyle) using pattern matching
 3. **Project** — generate platform-specific memory files for each AI
 4. **Deploy** — optionally write projections to each platform's actual config location
@@ -77,6 +77,21 @@ hub reconcile
 ```
 
 This is optional if you already have the full ChatGPT conversation ZIP (Step 1 above).
+
+### Claude.ai Export
+
+**Export your data from Claude.ai:**
+1. Go to [claude.ai](https://claude.ai) -> Settings -> Privacy -> Export Data
+2. Confirm via email, download the ZIP
+3. Import into memory-hub:
+
+```bash
+# Unzip and pass the folder (or pass the ZIP directly)
+hub ingest claude --zip path/to/claude_export_folder
+hub reconcile
+```
+
+This ingests all conversations (messages) and stored memories from your Claude account.
 
 ### Claude.ai (Web Chat)
 
@@ -146,6 +161,7 @@ This generates three files in `data/projections/chatgpt/`:
 | `hub gui` | Launch Streamlit web dashboard |
 | `hub ingest chatgpt --zip <path>` | Ingest ChatGPT export ZIP |
 | `hub ingest chatgpt-memory --file <path>` | Ingest ChatGPT memory dump |
+| `hub ingest claude --zip <path>` | Ingest Claude export (ZIP or folder) |
 | `hub reconcile` | Extract facts from events, detect conflicts |
 | `hub project claude-chat` | Generate Claude.ai memory import chunks |
 | `hub project claude-code [--deploy]` | Generate/deploy Claude Code files |
@@ -168,17 +184,19 @@ Export from AI  ->  Ingest  ->  Reconcile  ->  Project  ->  Deploy
 
 **Weekly sync** (`hub sync --profile weekly`):
 1. Auto-finds the latest ChatGPT memory dump (`.md`) in `data/raw/chatgpt_exports/`
-2. Ingests it (skips duplicates)
-3. Runs reconcile to extract/update facts
-4. Generates projections for Claude.ai, Claude Code, and OpenClaw
-5. Writes a timestamped report to `reports/`
+2. Auto-finds the latest Claude export (`.zip`) in `data/raw/claude_exports/`
+3. Ingests both (skips duplicates)
+4. Runs reconcile to extract/update facts
+5. Generates projections for Claude.ai, Claude Code, and OpenClaw
+6. Writes a timestamped report to `reports/`
 
 **Monthly sync** (`hub sync --profile monthly`):
 1. Auto-finds the latest ChatGPT conversation ZIP in `data/raw/chatgpt_exports/`
 2. Also ingests latest ChatGPT memory dump (if available)
-3. Reconciles everything
-4. Generates projections for ALL platforms (including ChatGPT)
-5. Writes a report
+3. Auto-finds the latest Claude export in `data/raw/claude_exports/`
+4. Reconciles everything
+5. Generates projections for ALL platforms (including ChatGPT)
+6. Writes a report
 
 **To run manually:**
 ```bash
@@ -216,7 +234,7 @@ The `data/` directory is machine-specific (created fresh by `hub init`). To set 
 1. Clone the git repo
 2. `pip install -e .`
 3. `hub init`
-4. Copy your export files (ChatGPT ZIP, Claude .md) to `data/raw/`
+4. Copy your export files (ChatGPT ZIP, Claude export ZIP) to `data/raw/`
 5. Run `hub ingest` + `hub reconcile` to rebuild the database
 
 The source code, scripts, and seed data are all in the repo. The database and projections are regenerated per-machine.

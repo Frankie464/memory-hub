@@ -43,7 +43,7 @@ scripts/            ← PowerShell wrapper scripts for Task Scheduler
 - CLAUDE.md modifications use `<!-- BEGIN MEMORY_HUB -->` / `<!-- END MEMORY_HUB -->` marker blocks to prevent duplication.
 - FTS index is maintained via INSERT/UPDATE/DELETE triggers on the events table.
 - Role column in events is unconstrained TEXT (ChatGPT uses tool/developer/unknown roles beyond user/assistant/system).
-- Dedup: event_id = SHA256(conversation_id + message_id) for ChatGPT conversations; content hash for ChatGPT memory dumps.
+- Dedup: event_id = SHA256(conversation_id + message_id) for ChatGPT conversations; SHA256(claude:{conv_id}:{msg_id}) for Claude conversations; content hash for memory dumps.
 
 ## Install & Run
 
@@ -54,6 +54,7 @@ hub init          # Initialize data dirs + DB
 hub gui           # Launch Streamlit dashboard at localhost:8501
 hub ingest chatgpt --zip path/to/export.zip
 hub ingest chatgpt-memory --file path/to/memory_dump.md
+hub ingest claude --zip path/to/claude_export.zip   # or unzipped folder
 hub reconcile
 hub project claude-code --deploy
 hub sync --profile weekly
@@ -74,5 +75,5 @@ Binary lives in PATH. Markdown output goes to `data/history/`.
 
 ## v1 vs v2 Scope
 
-v1 (built): init, ingest chatgpt (ZIP + memory dump), reconcile, project all platforms, search, sync, Streamlit GUI
+v1 (built): init, ingest chatgpt (ZIP + memory dump) + claude (ZIP/folder), reconcile, project all platforms, search, sync, Streamlit GUI
 v2 (deferred): interactive facts browser, conflicts resolver, OpenClaw log ingestion, cross-AI verify suite

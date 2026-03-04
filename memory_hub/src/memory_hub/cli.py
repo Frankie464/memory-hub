@@ -150,6 +150,29 @@ def ingest_chatgpt_memory(file_path: Path, db_path: Path):
     )
 
 
+@ingest.command("claude")
+@click.option("--zip", "zip_path", required=True, type=click.Path(exists=True, path_type=Path),
+              help="Path to Claude export ZIP file or unzipped folder")
+@click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)
+def ingest_claude(zip_path: Path, db_path: Path):
+    """Ingest Claude conversations and memories export."""
+    from memory_hub.ingest.claude import ingest_claude_zip
+    _db = db_path or DB_PATH
+    console.print(f"[bold]Ingesting Claude export:[/bold] {zip_path.name}")
+    with console.status("Parsing conversations and memories..."):
+        stats = ingest_claude_zip(zip_path, _db)
+    console.print(
+        f"  [green]OK[/green] {stats['conversations']:,} conversations, "
+        f"{stats['messages_added']:,} messages added, "
+        f"{stats['messages_skipped']:,} skipped"
+    )
+    if stats["memories_added"] or stats["memories_skipped"]:
+        console.print(
+            f"  [green]OK[/green] {stats['memories_added']} stored memories added, "
+            f"{stats['memories_skipped']} skipped"
+        )
+
+
 # ── hub reconcile ─────────────────────────────────────────────────────────────
 
 @cli.command()

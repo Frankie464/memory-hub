@@ -6,6 +6,7 @@ from memory_hub.config import DB_PATH, RAW_DIR, REPORTS_DIR
 from memory_hub.db import get_connection, get_stats
 from memory_hub.ingest.chatgpt import ingest_chatgpt_zip
 from memory_hub.ingest.chatgpt_memory import ingest_chatgpt_memory
+from memory_hub.ingest.claude import ingest_claude_zip
 from memory_hub.project.claude_chat import project_claude_chat
 from memory_hub.project.claude_code import project_claude_code
 from memory_hub.project.openclaw import project_openclaw
@@ -44,10 +45,11 @@ def _auto_find_latest(directory: Path, pattern: str) -> Path | None:
 def sync_weekly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
     """
     Weekly sync workflow:
-    1. Ingest latest ChatGPT memory dump (if available in raw/chatgpt_exports/)
-    2. Reconcile facts
-    3. Generate projections for Claude.ai, Claude Code, OpenClaw
-    4. Write sync report
+    1. Ingest latest ChatGPT memory dump (if available)
+    2. Ingest latest Claude export (if available)
+    3. Reconcile facts
+    4. Generate projections for Claude.ai, Claude Code, OpenClaw
+    5. Write sync report
     """
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     results = {"profile": "weekly", "ran_at": now, "steps": []}
@@ -63,7 +65,21 @@ def sync_weekly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
     else:
         results["steps"].append("⚠ No ChatGPT memory dump found in data/raw/chatgpt_exports/")
 
-    # Step 2: Reconcile
+    # Step 2: Ingest Claude export (auto-find latest .zip)
+    claude_zip = _auto_find_latest(RAW_DIR / "claude_exports", "*.zip")
+    if claude_zip:
+        try:
+            stats = ingest_claude_zip(claude_zip, db_path)
+            results["steps"].append(
+                f"✓ Claude ingest: {stats['messages_added']:,} messages, "
+                f"{stats['memories_added']} memories from {claude_zip.name}"
+            )
+        except Exception as e:
+            results["steps"].append(f"✗ Claude ingest failed: {e}")
+    else:
+        results["steps"].append("⚠ No Claude export found in data/raw/claude_exports/")
+
+    # Step 3: Reconcile
     try:
         rec = reconcile(db_path)
         results["steps"].append(
@@ -100,9 +116,10 @@ def sync_monthly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
     Monthly sync workflow:
     1. Ingest latest ChatGPT ZIP (auto-find in raw/chatgpt_exports/)
     2. Ingest latest ChatGPT memory dump (if available)
-    3. Reconcile
-    4. Generate ALL projections
-    5. Write sync report
+    3. Ingest latest Claude export (if available)
+    4. Reconcile
+    5. Generate ALL projections
+    6. Write sync report
     """
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     results = {"profile": "monthly", "ran_at": now, "steps": []}
@@ -132,7 +149,21 @@ def sync_monthly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
     else:
         results["steps"].append("⚠ No ChatGPT memory dump found")
 
-    # Step 3: Reconcile
+    # Step 3: Ingest Claude export (auto-find latest .zip)
+    claude_zip = _auto_find_latest(RAW_DIR / "claude_exports", "*.zip")
+    if claude_zip:
+        try:
+            stats = ingest_claude_zip(claude_zip, db_path)
+            results["steps"].append(
+                f"✓ Claude ingest: {stats['messages_added']:,} messages, "
+                f"{stats['memories_added']} memories from {claude_zip.name}"
+            )
+        except Exception as e:
+            results["steps"].append(f"✗ Claude ingest failed: {e}")
+    else:
+        results["steps"].append("⚠ No Claude export found in data/raw/claude_exports/")
+
+    # Step 4: Reconcile
     try:
         rec = reconcile(db_path)
         results["steps"].append(
@@ -141,7 +172,7 @@ def sync_monthly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
     except Exception as e:
         results["steps"].append(f"✗ Reconcile failed: {e}")
 
-    # Step 4: All projections
+    # Step 5: All projections
     for name, fn, kwargs in [
         ("Claude.ai", project_claude_chat, {"db_path": db_path}),
         ("Claude Code", project_claude_code, {"deploy": deploy, "db_path": db_path}),
@@ -155,7 +186,7 @@ def sync_monthly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
         except Exception as e:
             results["steps"].append(f"✗ {name} projection failed: {e}")
 
-    # Step 5: Stats
+    # Step 6: Stats
     with get_connection(db_path) as conn:
         stats = get_stats(conn)
     results["stats"] = stats

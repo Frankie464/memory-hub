@@ -278,9 +278,10 @@ elif page == "🧭 Setup Wizard":
         PROFILE_MANUAL_PATH.exists(),
         (RAW_DIR / "chatgpt_exports").exists() and any((RAW_DIR / "chatgpt_exports").glob("*.md")),
         (RAW_DIR / "chatgpt_exports").exists() and any((RAW_DIR / "chatgpt_exports").glob("*.zip")),
+        (RAW_DIR / "claude_exports").exists() and any((RAW_DIR / "claude_exports").glob("*.zip")),
         PROFILE_GENERATED_PATH.exists(),
     ])
-    st.progress(steps_done / 6, text=f"Step {steps_done}/6 complete")
+    st.progress(steps_done / 7, text=f"Step {steps_done}/7 complete")
     st.markdown("---")
 
     # ── Step 1: Request ChatGPT Export ──────────────────────────────────────
@@ -388,8 +389,41 @@ This may take a minute for large exports (thousands of conversations).
         else:
             st.info("No ZIP files yet. This step becomes available once your ChatGPT export arrives.")
 
-    # ── Step 5: Build profile ──────────────────────────────────────────────
-    with st.expander("🔬 Step 5 — Build your memory profile", expanded=_db_ready() and not PROFILE_GENERATED_PATH.exists()):
+    # ── Step 5: Ingest Claude export ──────────────────────────────────────
+    with st.expander("🟣 Step 5 — Import your Claude export", expanded=False):
+        st.markdown("""
+Export from [claude.ai](https://claude.ai) → **Settings → Privacy → Export Data**.
+Upload the ZIP or drop it into `data/raw/claude_exports/`.
+This imports both conversations and Claude's stored memories about you.
+""")
+        uploaded_claude_wiz = st.file_uploader("Upload Claude export ZIP", type=["zip"], key="claude_wiz_upload")
+        if uploaded_claude_wiz:
+            dest = RAW_DIR / "claude_exports" / uploaded_claude_wiz.name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(uploaded_claude_wiz.getbuffer())
+            st.success(f"Saved to {dest}")
+
+        claude_wiz_zips = list((RAW_DIR / "claude_exports").glob("*.zip")) if (RAW_DIR / "claude_exports").exists() else []
+        if claude_wiz_zips:
+            selected_claude = st.selectbox("ZIP to ingest", [f.name for f in claude_wiz_zips], key="claude_wiz_select")
+            if st.button("Ingest Claude Export", type="primary", key="claude_wiz_btn"):
+                _require_db()
+                from memory_hub.ingest.claude import ingest_claude_zip
+                chosen = RAW_DIR / "claude_exports" / selected_claude
+                with st.spinner("Parsing conversations and memories..."):
+                    stats = ingest_claude_zip(chosen, DB_PATH)
+                st.success(
+                    f"✅ {stats['conversations']:,} conversations — "
+                    f"{stats['messages_added']:,} messages added, "
+                    f"{stats['messages_skipped']:,} skipped"
+                )
+                if stats["memories_added"]:
+                    st.info(f"Also imported {stats['memories_added']} stored memories.")
+        else:
+            st.info("No ZIP files found in `data/raw/claude_exports/`. Upload one above or export from claude.ai.")
+
+    # ── Step 6: Build profile ──────────────────────────────────────────────
+    with st.expander("🔬 Step 6 — Build your memory profile", expanded=_db_ready() and not PROFILE_GENERATED_PATH.exists()):
         st.markdown("""
 Reconcile scans all ingested events and extracts facts (identity, preferences, work, interests, etc.)
 into the canonical database. It then generates `user_profile.generated.md` automatically.
@@ -413,8 +447,8 @@ into `user_profile.manual.md` — the manual file is **never** auto-overwritten.
             if st.checkbox("Preview generated profile"):
                 st.code(PROFILE_GENERATED_PATH.read_text(encoding="utf-8"), language="markdown")
 
-    # ── Step 6: Deploy ─────────────────────────────────────────────────────
-    with st.expander("🚀 Step 6 — Deploy to your AI platforms", expanded=PROFILE_GENERATED_PATH.exists()):
+    # ── Step 7: Deploy ─────────────────────────────────────────────────────
+    with st.expander("🚀 Step 7 — Deploy to your AI platforms", expanded=PROFILE_GENERATED_PATH.exists()):
         st.markdown("""
 Generate platform-specific memory files. Use the **Generate Projections** and **Deploy to Platforms**
 pages for detailed per-platform controls.
@@ -443,7 +477,7 @@ elif page == "📥 Ingest Data":
     st.title("📥 Ingest Data")
     _require_db()
 
-    tab_cg, tab_cl = st.tabs(["💬 ChatGPT Conversations", "💬 ChatGPT Memories"])
+    tab_cg, tab_cl, tab_claude = st.tabs(["💬 ChatGPT Conversations", "💬 ChatGPT Memories", "🟣 Claude Export"])
 
     with tab_cg:
         st.subheader("ChatGPT Export Ingest")
@@ -532,6 +566,55 @@ Upload the file or drop it into `data/raw/chatgpt_exports/`.
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.caption("No memory dump ingests yet.")
+
+    with tab_claude:
+        st.subheader("Claude Export Ingest")
+        st.markdown("""
+Import a Claude export ZIP (or unzipped folder) containing `conversations.json` and `memories.json`.
+Export from [claude.ai](https://claude.ai) → Settings → Privacy → Export Data.
+Upload the file or drop it into `data/raw/claude_exports/`.
+""")
+        uploaded_claude = st.file_uploader("Upload Claude export ZIP", type=["zip"], key="ingest_claude_up")
+        if uploaded_claude:
+            dest = RAW_DIR / "claude_exports" / uploaded_claude.name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(uploaded_claude.getbuffer())
+            st.success(f"Saved: {dest.name}")
+
+        claude_zips = sorted(
+            (RAW_DIR / "claude_exports").glob("*.zip"),
+            key=lambda p: p.stat().st_mtime, reverse=True
+        ) if (RAW_DIR / "claude_exports").exists() else []
+        if claude_zips:
+            chosen_claude = st.selectbox("Select ZIP to ingest", [z.name for z in claude_zips], key="claude_select")
+            if st.button("Ingest Claude Export", type="primary", key="claude_ingest"):
+                from memory_hub.ingest.claude import ingest_claude_zip
+                with st.spinner("Parsing conversations and memories..."):
+                    s = ingest_claude_zip(RAW_DIR / "claude_exports" / chosen_claude, DB_PATH)
+                st.success(
+                    f"✅ {s['conversations']:,} conversations — "
+                    f"{s['messages_added']:,} messages added, {s['messages_skipped']:,} skipped"
+                )
+                if s["memories_added"]:
+                    st.info(f"Also imported {s['memories_added']} stored memories.")
+        else:
+            st.info("No ZIP files found in `data/raw/claude_exports/`.")
+
+        st.markdown("---")
+        st.markdown("**Past Claude ingests:**")
+        with get_connection(DB_PATH) as conn:
+            logs = conn.execute(
+                "SELECT file_path, events_added, events_skipped, completed_at "
+                "FROM ingest_log WHERE source='claude' ORDER BY started_at DESC LIMIT 10"
+            ).fetchall()
+        if logs:
+            import pandas as pd
+            df = pd.DataFrame([dict(r) for r in logs])
+            df["file_path"] = df["file_path"].apply(lambda x: Path(x).name if x else "")
+            df.columns = ["File", "Added", "Skipped", "Completed"]
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.caption("No Claude ingests yet.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
