@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS events (
     conversation_id TEXT,
     conversation_title TEXT,
     topic_tags TEXT DEFAULT '[]',
-    ingested_at TEXT DEFAULT (datetime('now'))
+    ingested_at TEXT DEFAULT (datetime('now')),
+    reconciled_at TEXT
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
@@ -190,6 +191,37 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
             END;
 
             PRAGMA user_version = 2;
+        """)
+
+    if version < 3:
+        # v3: Add reconciled_at to events, create embeddings + conversation_summaries tables.
+        # Also add reconciled_at column (ALTER TABLE is safe; column doesn't exist yet).
+        try:
+            conn.execute("ALTER TABLE events ADD COLUMN reconciled_at TEXT")
+        except Exception:
+            pass  # Column already exists (e.g. new DB where SCHEMA already has it)
+
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS embeddings (
+                event_id TEXT PRIMARY KEY,
+                embedding BLOB NOT NULL,
+                model TEXT DEFAULT 'all-MiniLM-L6-v2',
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS conversation_summaries (
+                conversation_id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                title TEXT,
+                summary TEXT NOT NULL,
+                key_topics TEXT DEFAULT '[]',
+                key_decisions TEXT DEFAULT '[]',
+                message_count INTEGER,
+                date_range TEXT,
+                generated_at TEXT DEFAULT (datetime('now'))
+            );
+
+            PRAGMA user_version = 3;
         """)
 
 
@@ -376,6 +408,16 @@ def get_stats(conn: sqlite3.Connection) -> dict:
     projections = conn.execute(
         "SELECT target, MAX(generated_at) FROM projections GROUP BY target"
     ).fetchall()
+    embeddings_count = 0
+    try:
+        embeddings_count = conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+    except sqlite3.OperationalError:
+        pass
+    summaries_count = 0
+    try:
+        summaries_count = conn.execute("SELECT COUNT(*) FROM conversation_summaries").fetchone()[0]
+    except sqlite3.OperationalError:
+        pass
     return {
         "events": events,
         "facts": facts,
@@ -383,4 +425,221 @@ def get_stats(conn: sqlite3.Connection) -> dict:
         "last_ingest": last_ingest[0] if last_ingest else None,
         "last_reconcile": last_reconcile[0] if last_reconcile else None,
         "projections": {row[0]: row[1] for row in projections},
+        "embeddings": embeddings_count,
+        "summaries": summaries_count,
     }
+
+
+# ── Embedding helpers ─────────────────────────────────────────────────────────
+
+import numpy as np
+
+_embedding_model = None
+
+
+def _get_embedding_model():
+    """Lazy-load the sentence-transformers model (singleton)."""
+    global _embedding_model
+    if _embedding_model is None:
+        from sentence_transformers import SentenceTransformer
+        _embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+    return _embedding_model
+
+
+def embed_batch(texts: list[str]) -> list[bytes]:
+    """Embed a list of texts, return as list of BLOB bytes."""
+    model = _get_embedding_model()
+    embeddings = model.encode(texts, batch_size=64, show_progress_bar=False)
+    return [e.astype(np.float32).tobytes() for e in embeddings]
+
+
+def embed_text(text: str) -> bytes:
+    """Embed a single text, return as BLOB bytes."""
+    return embed_batch([text])[0]
+
+
+def store_embedding(conn: sqlite3.Connection, event_id: str, embedding: bytes) -> None:
+    """Insert or replace an embedding for an event."""
+    conn.execute(
+        "INSERT OR REPLACE INTO embeddings (event_id, embedding) VALUES (?,?)",
+        (event_id, embedding),
+    )
+
+
+def get_events_without_embeddings(conn: sqlite3.Connection) -> list:
+    """Return events that don't have embeddings yet."""
+    return conn.execute(
+        """SELECT event_id, content FROM events
+           WHERE event_id NOT IN (SELECT event_id FROM embeddings)
+           ORDER BY ingested_at ASC"""
+    ).fetchall()
+
+
+def search_semantic(conn: sqlite3.Connection, query: str, limit: int = 50) -> list:
+    """
+    Semantic similarity search using embeddings.
+    Returns list of (event_id, score) sorted by descending similarity.
+    """
+    query_emb = np.frombuffer(embed_text(query), dtype=np.float32)
+    rows = conn.execute(
+        "SELECT e.event_id, e.source, e.timestamp_utc, e.conversation_title, "
+        "e.content, em.embedding "
+        "FROM embeddings em JOIN events e ON e.event_id = em.event_id"
+    ).fetchall()
+    if not rows:
+        return []
+
+    scores = []
+    for row in rows:
+        emb = np.frombuffer(row["embedding"], dtype=np.float32)
+        # Cosine similarity
+        norm_q = np.linalg.norm(query_emb)
+        norm_e = np.linalg.norm(emb)
+        if norm_q > 0 and norm_e > 0:
+            score = float(np.dot(query_emb, emb) / (norm_q * norm_e))
+        else:
+            score = 0.0
+        scores.append((row, score))
+
+    scores.sort(key=lambda x: x[1], reverse=True)
+    return scores[:limit]
+
+
+def search_hybrid(conn: sqlite3.Connection, query: str, limit: int = 10) -> list:
+    """
+    Hybrid search combining FTS5 keyword rank and semantic cosine similarity
+    via Reciprocal Rank Fusion (k=60).
+    Returns list of Row-like dicts with merged score.
+    """
+    TOP_N = 50
+    K = 60
+
+    # FTS5 results (ranked by relevance)
+    fts_query = _sanitize_fts_query(query)
+    fts_rows = []
+    try:
+        fts_rows = conn.execute(
+            """SELECT e.event_id, e.source, e.timestamp_utc, e.conversation_title,
+                      snippet(events_fts, 0, '<b>', '</b>', '...', 30) AS snippet
+               FROM events_fts
+               JOIN events e ON e.rowid = events_fts.rowid
+               WHERE events_fts MATCH ?
+               ORDER BY rank
+               LIMIT ?""",
+            (fts_query, TOP_N),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        pass
+
+    # Semantic results
+    sem_results = search_semantic(conn, query, limit=TOP_N)
+
+    # Build rank maps: event_id -> rank (0-indexed)
+    fts_rank = {row["event_id"]: i for i, row in enumerate(fts_rows)}
+    sem_rank = {row["event_id"]: i for i, (row, _score) in enumerate(sem_results)}
+
+    # Collect all candidate event IDs
+    all_ids = set(fts_rank) | set(sem_rank)
+
+    # RRF scoring
+    rrf_scores = {}
+    for eid in all_ids:
+        score = 0.0
+        if eid in fts_rank:
+            score += 1.0 / (K + fts_rank[eid])
+        if eid in sem_rank:
+            score += 1.0 / (K + sem_rank[eid])
+        rrf_scores[eid] = score
+
+    # Sort by RRF score, take top N
+    top_ids = sorted(rrf_scores, key=lambda x: rrf_scores[x], reverse=True)[:limit]
+
+    # Build result rows with snippet from FTS if available, else content preview
+    fts_by_id = {row["event_id"]: row for row in fts_rows}
+    sem_by_id = {row["event_id"]: row for row, _ in sem_results}
+
+    results = []
+    for eid in top_ids:
+        if eid in fts_by_id:
+            row = fts_by_id[eid]
+            results.append({
+                "event_id": eid,
+                "source": row["source"],
+                "timestamp_utc": row["timestamp_utc"],
+                "conversation_title": row["conversation_title"],
+                "snippet": row["snippet"],
+                "rrf_score": rrf_scores[eid],
+            })
+        elif eid in sem_by_id:
+            row = sem_by_id[eid]
+            content = row["content"] or ""
+            snippet = content[:200] + "..." if len(content) > 200 else content
+            results.append({
+                "event_id": eid,
+                "source": row["source"],
+                "timestamp_utc": row["timestamp_utc"],
+                "conversation_title": row["conversation_title"],
+                "snippet": snippet,
+                "rrf_score": rrf_scores[eid],
+            })
+    return results
+
+
+def get_unreconciled_events(conn: sqlite3.Connection, role: str = "user") -> list:
+    """Return events not yet LLM-reconciled, optionally filtered by role."""
+    return conn.execute(
+        "SELECT * FROM events WHERE reconciled_at IS NULL AND role = ? ORDER BY ingested_at ASC",
+        (role,),
+    ).fetchall()
+
+
+def mark_events_reconciled(conn: sqlite3.Connection, event_ids: list[str]) -> None:
+    """Set reconciled_at = now for the given event IDs."""
+    if not event_ids:
+        return
+    placeholders = ",".join("?" * len(event_ids))
+    conn.execute(
+        f"UPDATE events SET reconciled_at = datetime('now') WHERE event_id IN ({placeholders})",
+        event_ids,
+    )
+
+
+# ── Conversation summary helpers ──────────────────────────────────────────────
+
+def upsert_summary(conn: sqlite3.Connection, summary: dict) -> None:
+    """Insert or replace a conversation summary."""
+    conn.execute(
+        """INSERT OR REPLACE INTO conversation_summaries
+           (conversation_id, source, title, summary, key_topics, key_decisions,
+            message_count, date_range, generated_at)
+           VALUES (:conversation_id, :source, :title, :summary, :key_topics,
+                   :key_decisions, :message_count, :date_range, datetime('now'))""",
+        summary,
+    )
+
+
+def get_unsummarized_conversations(conn: sqlite3.Connection) -> list:
+    """Return distinct conversations with 3+ messages not yet summarized."""
+    return conn.execute(
+        """SELECT conversation_id, source, conversation_title AS title,
+                  COUNT(*) AS message_count,
+                  MIN(timestamp_utc) AS first_ts, MAX(timestamp_utc) AS last_ts
+           FROM events
+           WHERE conversation_id IS NOT NULL
+             AND conversation_id NOT IN (SELECT conversation_id FROM conversation_summaries)
+           GROUP BY conversation_id
+           HAVING message_count >= 3
+           ORDER BY first_ts ASC"""
+    ).fetchall()
+
+
+def search_summaries(conn: sqlite3.Connection, query: str, limit: int = 10) -> list:
+    """FTS-style search over conversation summaries (title + summary text)."""
+    q = f"%{query}%"
+    return conn.execute(
+        """SELECT * FROM conversation_summaries
+           WHERE summary LIKE ? OR title LIKE ? OR key_topics LIKE ?
+           ORDER BY generated_at DESC
+           LIMIT ?""",
+        (q, q, q, limit),
+    ).fetchall()

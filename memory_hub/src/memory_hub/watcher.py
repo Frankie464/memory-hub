@@ -7,6 +7,7 @@ import hashlib
 import json
 import shutil
 import time
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -17,14 +18,9 @@ ARCHIVE_DIR = RAW_DIR / "archive"
 DOWNLOADS_DIR = Path.home() / "Downloads"
 POLL_INTERVAL_SECONDS = 604800  # 1 week default
 
-# Patterns for auto-detecting exports in ~/Downloads
-DOWNLOADS_PATTERNS = [
-    # (glob_pattern, dest_subdir, ingest_type)
-    ("data-*-batch-*/conversations.json", "chatgpt_exports", "chatgpt_folder"),
-    ("data-*.zip", "chatgpt_exports", "chatgpt_zip"),
-    ("claude-*.zip", "claude_exports", "claude_zip"),
-    ("Claude-*.zip", "claude_exports", "claude_zip"),
-]
+# Patterns for auto-detecting exports in ~/Downloads (ZIPs only — we detect source by peeking)
+DOWNLOADS_ZIP_GLOB = "*.zip"
+DOWNLOADS_FOLDER_PATTERN = "data-*"  # unzipped ChatGPT exports (folder with conversations.json)
 
 # Patterns for watching raw directories
 RAW_WATCH_SPECS = [
@@ -33,6 +29,41 @@ RAW_WATCH_SPECS = [
     ("chatgpt_exports", "*.md", "chatgpt_memory"),
     ("claude_exports", "*.zip", "claude_zip"),
 ]
+
+
+def _detect_zip_source(zip_path: Path) -> str | None:
+    """
+    Peek inside a ZIP to determine if it's a ChatGPT or Claude export.
+
+    ChatGPT exports contain conversations.json with a 'mapping' key on items.
+    Claude exports contain conversations.json with a 'chat_messages' key, or memories.json.
+    Returns 'chatgpt', 'claude', or None if unrecognized.
+    """
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            names = zf.namelist()
+            # Check for memories.json — unique to Claude exports
+            if any(n.endswith("memories.json") for n in names):
+                return "claude"
+            # Check conversations.json structure
+            conv_name = next((n for n in names if n.endswith("conversations.json")), None)
+            if conv_name:
+                with zf.open(conv_name) as f:
+                    try:
+                        data = json.load(f)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        return None
+                    if isinstance(data, list) and data:
+                        sample = data[0]
+                        if "mapping" in sample:
+                            return "chatgpt"
+                        if "chat_messages" in sample:
+                            return "claude"
+                        # Fallback: conversations.json present but ambiguous
+                        return "chatgpt"
+    except (zipfile.BadZipFile, KeyError, OSError):
+        return None
+    return None
 
 
 def _file_hash(path: Path) -> str:
@@ -212,26 +243,48 @@ def scan_once(db_path: Path = DB_PATH) -> dict:
 
     # ── Check ~/Downloads for new exports ──
     if DOWNLOADS_DIR.exists():
-        for pattern, dest_subdir, ingest_type in DOWNLOADS_PATTERNS:
-            for path in sorted(DOWNLOADS_DIR.glob(pattern)):
-                if ingest_type == "chatgpt_folder":
-                    # The glob matched conversations.json inside a folder
-                    src = path.parent  # the data-* folder
-                    state_key = str(src.resolve())
-                else:
-                    src = path
-                    state_key = str(path.resolve())
+        # Detect ZIPs by peeking at contents (not filename patterns)
+        for zip_path in sorted(DOWNLOADS_DIR.glob(DOWNLOADS_ZIP_GLOB)):
+            if not zip_path.is_file():
+                continue
+            state_key = str(zip_path.resolve())
+            if state.get("files", {}).get(state_key):
+                continue  # already processed
 
-                if state.get("files", {}).get(state_key):
-                    continue  # already processed
+            source = _detect_zip_source(zip_path)
+            if source == "chatgpt":
+                dest_subdir = "chatgpt_exports"
+            elif source == "claude":
+                dest_subdir = "claude_exports"
+            else:
+                events.append(f"Skipped unrecognized ZIP in Downloads: {zip_path.name}")
+                continue
 
-                events.append(f"New export in Downloads: {src.name}")
-                try:
-                    moved = _move_from_downloads(src, dest_subdir)
-                    events.append(f"  Moved to: {moved.relative_to(RAW_DIR)}")
-                except Exception as exc:
-                    events.append(f"  Move failed: {exc}")
-                    continue
+            events.append(f"New {source} export in Downloads: {zip_path.name}")
+            try:
+                moved = _move_from_downloads(zip_path, dest_subdir)
+                events.append(f"  Moved to: {moved.relative_to(RAW_DIR)}")
+            except Exception as exc:
+                events.append(f"  Move failed: {exc}")
+                continue
+
+        # Detect unzipped ChatGPT folder exports (data-* folders with conversations.json)
+        for folder in sorted(DOWNLOADS_DIR.glob(DOWNLOADS_FOLDER_PATTERN)):
+            if not folder.is_dir():
+                continue
+            if not (folder / "conversations.json").exists():
+                continue
+            state_key = str(folder.resolve())
+            if state.get("files", {}).get(state_key):
+                continue
+
+            events.append(f"New ChatGPT folder export in Downloads: {folder.name}")
+            try:
+                moved = _move_from_downloads(folder, "chatgpt_exports")
+                events.append(f"  Moved to: {moved.relative_to(RAW_DIR)}")
+            except Exception as exc:
+                events.append(f"  Move failed: {exc}")
+                continue
 
     # ── Check raw directories for new files ──
     for subdir, pattern, ingest_type in RAW_WATCH_SPECS:

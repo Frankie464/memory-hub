@@ -20,7 +20,10 @@ from mcp.server.stdio import stdio_server
 from mcp import types
 
 from memory_hub.config import DB_PATH
-from memory_hub.db import get_ro_connection, _sanitize_fts_query, get_active_facts, get_stats
+from memory_hub.db import (
+    get_ro_connection, get_connection, _sanitize_fts_query,
+    get_active_facts, get_stats, search_hybrid, search_summaries,
+)
 
 MAX_RESULTS = 10
 MAX_SNIPPET_LEN = 300
@@ -46,11 +49,35 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="search_memories",
-            description="Search the user's memory database for relevant context.",
+            description=(
+                "Search the user's memory database for relevant context using hybrid "
+                "keyword + semantic search. Use this to find past conversations about any topic."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Search terms"},
+                    "query": {"type": "string", "description": "Search terms (natural language ok)"},
+                    "limit": {"type": "integer", "default": 5, "maximum": MAX_RESULTS},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["hybrid", "keyword", "semantic"],
+                        "default": "hybrid",
+                        "description": "Search mode: hybrid (default), keyword, or semantic",
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        types.Tool(
+            name="search_conversations",
+            description=(
+                "Search conversation summaries to quickly find what topics were discussed. "
+                "Returns summaries with key topics and decisions."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Topic or keyword to search for"},
                     "limit": {"type": "integer", "default": 5, "maximum": MAX_RESULTS},
                 },
                 "required": ["query"],
@@ -89,13 +116,15 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     try:
         if name == "search_memories":
             return _handle_search(arguments)
+        elif name == "search_conversations":
+            return _handle_search_conversations(arguments)
         elif name == "get_facts":
             return _handle_facts(arguments)
         elif name == "get_status":
             return _handle_status()
         return [types.TextContent(type="text", text="Unknown tool.")]
-    except Exception:
-        return [types.TextContent(type="text", text="Memory service temporarily unavailable.")]
+    except Exception as e:
+        return [types.TextContent(type="text", text=f"Memory service temporarily unavailable: {e}")]
 
 
 def _handle_search(arguments: dict) -> list[types.TextContent]:
@@ -104,30 +133,74 @@ def _handle_search(arguments: dict) -> list[types.TextContent]:
         return [types.TextContent(type="text", text="No query provided.")]
 
     limit = min(int(arguments.get("limit", 5)), MAX_RESULTS)
-    fts_query = _sanitize_fts_query(query)
+    mode = arguments.get("mode", "hybrid")
 
-    with get_ro_connection() as conn:
-        rows = conn.execute(
-            """SELECT e.source, e.timestamp_utc, e.conversation_title,
-                      snippet(events_fts, 0, '', '', '...', 30) AS snippet
-               FROM events_fts
-               JOIN events e ON e.rowid = events_fts.rowid
-               WHERE events_fts MATCH ?
-               ORDER BY rank
-               LIMIT ?""",
-            (fts_query, limit),
-        ).fetchall()
+    with get_connection() as conn:
+        if mode == "keyword":
+            fts_query = _sanitize_fts_query(query)
+            try:
+                rows = conn.execute(
+                    """SELECT e.source, e.timestamp_utc, e.conversation_title,
+                              snippet(events_fts, 0, '', '', '...', 30) AS snippet
+                       FROM events_fts
+                       JOIN events e ON e.rowid = events_fts.rowid
+                       WHERE events_fts MATCH ?
+                       ORDER BY rank LIMIT ?""",
+                    (fts_query, limit),
+                ).fetchall()
+            except Exception:
+                rows = []
+            if not rows:
+                return [types.TextContent(type="text", text="No matching memories found.")]
+            lines = []
+            for r in rows:
+                snippet = _truncate(r["snippet"] or "", MAX_SNIPPET_LEN)
+                title = (r["conversation_title"] or "")[:50]
+                date = (r["timestamp_utc"] or "")[:10]
+                lines.append(f"[{r['source']}|{date}] {title}: {snippet}")
+            return [types.TextContent(type="text", text="\n\n".join(lines))]
+        else:
+            # hybrid (default) or semantic
+            try:
+                results = search_hybrid(conn, query, limit=limit)
+            except Exception:
+                results = []
+            if not results:
+                return [types.TextContent(type="text", text="No matching memories found.")]
+            lines = []
+            for r in results:
+                snippet = _truncate(r.get("snippet") or "", MAX_SNIPPET_LEN)
+                title = (r.get("conversation_title") or "")[:50]
+                date = (r.get("timestamp_utc") or "")[:10]
+                source = r.get("source") or ""
+                lines.append(f"[{source}|{date}] {title}: {snippet}")
+            return [types.TextContent(type="text", text="\n\n".join(lines))]
+
+
+def _handle_search_conversations(arguments: dict) -> list[types.TextContent]:
+    query = str(arguments.get("query", "")).strip()
+    if not query:
+        return [types.TextContent(type="text", text="No query provided.")]
+
+    limit = min(int(arguments.get("limit", 5)), MAX_RESULTS)
+
+    with get_connection() as conn:
+        rows = search_summaries(conn, query, limit=limit)
 
     if not rows:
-        return [types.TextContent(type="text", text="No matching memories found.")]
+        return [types.TextContent(type="text", text="No conversation summaries found.")]
 
+    import json as _json
     lines = []
     for r in rows:
-        snippet = _truncate(r["snippet"] or "", MAX_SNIPPET_LEN)
-        title = (r["conversation_title"] or "")[:50]
-        date = (r["timestamp_utc"] or "")[:10]
-        source = r["source"] or ""
-        lines.append(f"[{source}|{date}] {title}: {snippet}")
+        topics = ", ".join(_json.loads(r["key_topics"] or "[]"))
+        decisions = "; ".join(_json.loads(r["key_decisions"] or "[]"))
+        line = f"[{r['source']}|{(r['date_range'] or '')[:10]}] {r['title'] or 'Untitled'}\n  {r['summary']}"
+        if topics:
+            line += f"\n  Topics: {topics}"
+        if decisions:
+            line += f"\n  Decisions: {decisions}"
+        lines.append(line)
     return [types.TextContent(type="text", text="\n\n".join(lines))]
 
 

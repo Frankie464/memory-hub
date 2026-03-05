@@ -214,22 +214,60 @@ def ingest_claude_code_cmd(projects_dir: Path, db_path: Path):
     )
 
 
+@ingest.command("openclaw")
+@click.option("--workspace", "workspace_dir", type=click.Path(path_type=Path), default=None,
+              help="Path to OpenClaw workspace (default: ~/.openclaw/workspace)")
+@click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)
+def ingest_openclaw_cmd(workspace_dir: Path, db_path: Path):
+    """Ingest OpenClaw workspace memory files (MEMORY.md + daily logs)."""
+    from memory_hub.ingest.openclaw import ingest_openclaw
+    _db = db_path or DB_PATH
+    console.print("[bold]Ingesting OpenClaw workspace memory...[/bold]")
+    with console.status("Parsing memory files..."):
+        stats = ingest_openclaw(workspace_dir, _db)
+    console.print(
+        f"  [green]OK[/green] {stats['files_found']} files, "
+        f"{stats['messages_added']:,} events added, "
+        f"{stats['messages_skipped']:,} skipped"
+    )
+
+
 # ── hub reconcile ─────────────────────────────────────────────────────────────
 
 @cli.command()
+@click.option("--llm/--no-llm", default=None,
+              help="Use LLM for fact extraction (default: on if ANTHROPIC_API_KEY is set)")
+@click.option("--backfill", is_flag=True, default=False,
+              help="Process all events, not just unreconciled ones")
 @click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)
-def reconcile(db_path: Path):
+def reconcile(llm: bool, backfill: bool, db_path: Path):
     """Extract facts from events and detect conflicts."""
+    import os
     from memory_hub.reconcile import reconcile as do_reconcile
     _db = db_path or DB_PATH
-    console.print("[bold]Running reconciliation...[/bold]")
-    with console.status("Scanning events and extracting facts..."):
-        stats = do_reconcile(_db)
+
+    # Default: use LLM if API key is available, unless explicitly disabled
+    if llm is None:
+        llm = bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+    if llm:
+        console.print("[bold]Running reconciliation with LLM extraction...[/bold]")
+    else:
+        console.print("[bold]Running reconciliation (regex only)...[/bold]")
+
+    if backfill:
+        console.print("  [dim]Backfill mode: processing all events[/dim]")
+
+    with console.status("Extracting facts..."):
+        stats = do_reconcile(_db, use_llm=llm, backfill=backfill)
+
     console.print(
         f"  [green]OK[/green] {stats['facts_added']} new facts, "
         f"{stats['facts_confirmed']} confirmed, "
         f"{stats['conflicts_added']} conflicts"
     )
+    if stats.get("llm_calls"):
+        console.print(f"  [dim]LLM calls made: {stats['llm_calls']}[/dim]")
     if PROFILE_GENERATED_PATH.exists():
         console.print(f"  [green]OK[/green] Profile regenerated: {PROFILE_GENERATED_PATH}")
 
@@ -311,27 +349,137 @@ def project_chatgpt_cmd(db_path: Path):
     console.print(f"\n[dim]Output: {PROJ_CHATGPT}[/dim]")
 
 
-# ── hub search ────────────────────────────────────────────────────────────────
+# ── hub embed ─────────────────────────────────────────────────────────────────
 
 @cli.command()
-@click.argument("query")
-@click.option("--limit", default=20, show_default=True, help="Max results to return")
+@click.option("--backfill", is_flag=True, default=False,
+              help="Embed all events (default: only new events without embeddings)")
 @click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)
-def search(query: str, limit: int, db_path: Path):
-    """Full-text search across all ingested conversations."""
+def embed(backfill: bool, db_path: Path):
+    """Generate semantic embeddings for events (enables hybrid search)."""
+    from memory_hub.db import (
+        get_events_without_embeddings, embed_batch, store_embedding,
+        get_connection as _gc,
+    )
     _db = db_path or DB_PATH
     if not _db.exists():
         console.print("[red]Database not found. Run `hub init` first.[/red]")
         sys.exit(1)
 
-    with get_connection(_db) as conn:
-        results = search_events(conn, query, limit)
+    with _gc(_db) as conn:
+        if backfill:
+            events = conn.execute(
+                "SELECT event_id, content FROM events ORDER BY ingested_at ASC"
+            ).fetchall()
+        else:
+            events = get_events_without_embeddings(conn)
 
-    if not results:
-        console.print(f"[yellow]No results for:[/yellow] {query}")
+    if not events:
+        console.print("[dim]All events already embedded.[/dim]")
         return
 
-    table = Table(title=f'Search: "{query}"', box=box.ROUNDED)
+    console.print(f"[bold]Embedding {len(events):,} events...[/bold]")
+    CHUNK = 128
+    embedded = 0
+    with console.status(f"Loading model and embedding...") as status:
+        texts = [row["content"] or "" for row in events]
+        ids = [row["event_id"] for row in events]
+
+        for i in range(0, len(texts), CHUNK):
+            chunk_texts = texts[i: i + CHUNK]
+            chunk_ids = ids[i: i + CHUNK]
+            blobs = embed_batch(chunk_texts)
+            with _gc(_db) as conn:
+                for eid, blob in zip(chunk_ids, blobs):
+                    store_embedding(conn, eid, blob)
+            embedded += len(chunk_ids)
+            status.update(f"Embedded {embedded:,}/{len(events):,}...")
+
+    console.print(f"  [green]OK[/green] {embedded:,} events embedded")
+
+
+# ── hub summarize ─────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--backfill", is_flag=True, default=False,
+              help="Re-summarize all conversations (default: only unsummarized)")
+@click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)
+def summarize(backfill: bool, db_path: Path):
+    """Generate LLM summaries for conversations (requires ANTHROPIC_API_KEY)."""
+    import os
+    from memory_hub.reconcile import summarize_conversations
+    _db = db_path or DB_PATH
+    if not _db.exists():
+        console.print("[red]Database not found. Run `hub init` first.[/red]")
+        sys.exit(1)
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        console.print("[red]ANTHROPIC_API_KEY not set. Cannot generate summaries.[/red]")
+        sys.exit(1)
+
+    console.print("[bold]Generating conversation summaries...[/bold]")
+    if backfill:
+        console.print("  [dim]Backfill mode: processing all conversations[/dim]")
+
+    with console.status("Summarizing..."):
+        stats = summarize_conversations(_db, backfill=backfill)
+
+    console.print(
+        f"  [green]OK[/green] {stats['summaries_added']} summaries generated, "
+        f"{stats['summaries_skipped']} skipped, "
+        f"{stats['llm_calls']} LLM calls"
+    )
+
+
+# ── hub search ────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.argument("query")
+@click.option("--limit", default=20, show_default=True, help="Max results to return")
+@click.option("--mode", type=click.Choice(["keyword", "semantic", "hybrid"]), default="hybrid",
+              show_default=True, help="Search mode")
+@click.option("--db", "db_path", type=click.Path(path_type=Path), default=None)
+def search(query: str, limit: int, mode: str, db_path: Path):
+    """Search across all ingested conversations (hybrid by default)."""
+    _db = db_path or DB_PATH
+    if not _db.exists():
+        console.print("[red]Database not found. Run `hub init` first.[/red]")
+        sys.exit(1)
+
+    from memory_hub.db import search_hybrid, search_semantic
+
+    with get_connection(_db) as conn:
+        if mode == "keyword":
+            results = search_events(conn, query, limit)
+            # Normalize to common format
+            results = [
+                {
+                    "source": r["source"],
+                    "timestamp_utc": r["timestamp_utc"],
+                    "conversation_title": r["conversation_title"],
+                    "snippet": r["snippet"],
+                }
+                for r in results
+            ]
+        elif mode == "semantic":
+            sem = search_semantic(conn, query, limit=limit)
+            results = []
+            for row, score in sem:
+                content = row["content"] or ""
+                results.append({
+                    "source": row["source"],
+                    "timestamp_utc": row["timestamp_utc"],
+                    "conversation_title": row["conversation_title"],
+                    "snippet": (content[:200] + "...") if len(content) > 200 else content,
+                })
+        else:  # hybrid
+            results = search_hybrid(conn, query, limit=limit)
+
+    if not results:
+        console.print(f"[yellow]No results for:[/yellow] {query} [dim]({mode})[/dim]")
+        return
+
+    table = Table(title=f'Search: "{query}" [{mode}]', box=box.ROUNDED)
     table.add_column("Source", style="cyan", width=8)
     table.add_column("Date", width=12)
     table.add_column("Conversation", width=30)
@@ -339,10 +487,10 @@ def search(query: str, limit: int, db_path: Path):
 
     for row in results:
         table.add_row(
-            row["source"] or "",
-            (row["timestamp_utc"] or "")[:10],
-            (row["conversation_title"] or "")[:30],
-            row["snippet"] or "",
+            (row.get("source") or "")[:8],
+            (row.get("timestamp_utc") or "")[:10],
+            (row.get("conversation_title") or "")[:30],
+            (row.get("snippet") or "")[:120],
         )
     console.print(table)
 

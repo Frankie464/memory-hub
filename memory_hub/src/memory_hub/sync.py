@@ -3,16 +3,17 @@ from datetime import datetime
 from pathlib import Path
 
 from memory_hub.config import DB_PATH, RAW_DIR, REPORTS_DIR
-from memory_hub.db import get_connection, get_stats
+from memory_hub.db import get_connection, get_stats, get_events_without_embeddings, embed_batch, store_embedding
 from memory_hub.ingest.chatgpt import ingest_chatgpt_zip
 from memory_hub.ingest.chatgpt_memory import ingest_chatgpt_memory
 from memory_hub.ingest.claude import ingest_claude_zip
 from memory_hub.ingest.github import ingest_github
+from memory_hub.ingest.openclaw import ingest_openclaw
 from memory_hub.project.claude_chat import project_claude_chat
 from memory_hub.project.claude_code import project_claude_code
 from memory_hub.project.openclaw import project_openclaw
 from memory_hub.project.chatgpt import project_chatgpt
-from memory_hub.reconcile import reconcile
+from memory_hub.reconcile import reconcile, summarize_conversations
 
 
 def _build_report_content(profile: str, now: str, steps: list, stats: dict) -> str:
@@ -92,12 +93,44 @@ def sync_weekly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
 
     # Step 4: Reconcile
     try:
-        rec = reconcile(db_path)
+        rec = reconcile(db_path, use_llm=True, backfill=False)
         results["steps"].append(
-            f"✓ Reconcile: {rec['facts_added']} new facts, {rec['facts_confirmed']} confirmed, {rec['conflicts_added']} conflicts"
+            f"✓ Reconcile: {rec['facts_added']} new facts, {rec['facts_confirmed']} confirmed"
         )
+        if rec.get("llm_calls"):
+            results["steps"].append(f"  (LLM: {rec['llm_calls']} calls)")
     except Exception as e:
         results["steps"].append(f"✗ Reconcile failed: {e}")
+
+    # Step 4b: Embed new events
+    try:
+        with get_connection(db_path) as conn:
+            to_embed = get_events_without_embeddings(conn)
+        if to_embed:
+            texts = [e["content"] or "" for e in to_embed]
+            ids = [e["event_id"] for e in to_embed]
+            blobs = embed_batch(texts)
+            with get_connection(db_path) as conn:
+                for eid, blob in zip(ids, blobs):
+                    store_embedding(conn, eid, blob)
+            results["steps"].append(f"✓ Embeddings: {len(to_embed)} events embedded")
+        else:
+            results["steps"].append("✓ Embeddings: all up to date")
+    except Exception as e:
+        results["steps"].append(f"⚠ Embeddings failed: {e}")
+
+    # Step 4c: Summarize new conversations
+    try:
+        sum_stats = summarize_conversations(db_path, backfill=False)
+        if sum_stats["summaries_added"] > 0:
+            results["steps"].append(
+                f"✓ Summaries: {sum_stats['summaries_added']} conversations summarized "
+                f"({sum_stats['llm_calls']} calls)"
+            )
+        else:
+            results["steps"].append("✓ Summaries: all up to date")
+    except Exception as e:
+        results["steps"].append(f"⚠ Summaries failed: {e}")
 
     # Step 5: Generate projections
     for name, fn, kwargs in [
@@ -186,12 +219,44 @@ def sync_monthly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
 
     # Step 5: Reconcile
     try:
-        rec = reconcile(db_path)
+        rec = reconcile(db_path, use_llm=True, backfill=False)
         results["steps"].append(
             f"✓ Reconcile: {rec['facts_added']} new facts, {rec['facts_confirmed']} confirmed"
         )
+        if rec.get("llm_calls"):
+            results["steps"].append(f"  (LLM: {rec['llm_calls']} calls)")
     except Exception as e:
         results["steps"].append(f"✗ Reconcile failed: {e}")
+
+    # Step 5b: Embed new events
+    try:
+        with get_connection(db_path) as conn:
+            to_embed = get_events_without_embeddings(conn)
+        if to_embed:
+            texts = [e["content"] or "" for e in to_embed]
+            ids = [e["event_id"] for e in to_embed]
+            blobs = embed_batch(texts)
+            with get_connection(db_path) as conn:
+                for eid, blob in zip(ids, blobs):
+                    store_embedding(conn, eid, blob)
+            results["steps"].append(f"✓ Embeddings: {len(to_embed)} events embedded")
+        else:
+            results["steps"].append("✓ Embeddings: all up to date")
+    except Exception as e:
+        results["steps"].append(f"⚠ Embeddings failed: {e}")
+
+    # Step 5c: Summarize new conversations
+    try:
+        sum_stats = summarize_conversations(db_path, backfill=False)
+        if sum_stats["summaries_added"] > 0:
+            results["steps"].append(
+                f"✓ Summaries: {sum_stats['summaries_added']} conversations summarized "
+                f"({sum_stats['llm_calls']} calls)"
+            )
+        else:
+            results["steps"].append("✓ Summaries: all up to date")
+    except Exception as e:
+        results["steps"].append(f"⚠ Summaries failed: {e}")
 
     # Step 6: All projections
     for name, fn, kwargs in [
