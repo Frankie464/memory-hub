@@ -10,6 +10,20 @@ import re
 
 logger = logging.getLogger(__name__)
 
+# Load .env from project root if present (keeps API key out of env/git)
+def _load_dotenv():
+    from pathlib import Path
+    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                if k.strip():
+                    os.environ[k.strip()] = v.strip()  # .env always wins over OpenClaw env
+
+_load_dotenv()
+
 DEFAULT_MODEL = "claude-haiku-4-5"
 BATCH_SIZE = 20  # user messages per LLM call
 
