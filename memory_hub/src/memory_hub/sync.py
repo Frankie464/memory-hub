@@ -9,6 +9,7 @@ from memory_hub.ingest.chatgpt_memory import ingest_chatgpt_memory
 from memory_hub.ingest.claude import ingest_claude_zip
 from memory_hub.ingest.github import ingest_github
 from memory_hub.ingest.openclaw import ingest_openclaw
+from memory_hub.project.openclaw import project_openclaw as _project_openclaw
 from memory_hub.project.claude_chat import project_claude_chat
 from memory_hub.project.claude_code import project_claude_code
 from memory_hub.project.openclaw import project_openclaw
@@ -90,6 +91,16 @@ def sync_weekly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
         )
     except Exception as e:
         results["steps"].append(f"⚠ GitHub ingest skipped: {e}")
+
+    # Step 3b: Ingest OpenClaw workspace memory files
+    try:
+        oc_stats = ingest_openclaw(db_path=db_path)
+        results["steps"].append(
+            f"✓ OpenClaw ingest: {oc_stats['files_found']} files, "
+            f"{oc_stats['messages_added']} events added"
+        )
+    except Exception as e:
+        results["steps"].append(f"⚠ OpenClaw ingest skipped: {e}")
 
     # Step 4: Reconcile
     try:
@@ -257,6 +268,16 @@ def sync_monthly(deploy: bool = False, db_path: Path = DB_PATH) -> dict:
             results["steps"].append("✓ Summaries: all up to date")
     except Exception as e:
         results["steps"].append(f"⚠ Summaries failed: {e}")
+
+    # Step 5b: Ingest OpenClaw workspace memory files
+    try:
+        oc_stats = ingest_openclaw(db_path=db_path)
+        results["steps"].append(
+            f"✓ OpenClaw ingest: {oc_stats['files_found']} files, "
+            f"{oc_stats['messages_added']} events added"
+        )
+    except Exception as e:
+        results["steps"].append(f"⚠ OpenClaw ingest skipped: {e}")
 
     # Step 6: All projections
     for name, fn, kwargs in [
