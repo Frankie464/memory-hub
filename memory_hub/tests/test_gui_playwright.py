@@ -128,21 +128,21 @@ def test_search_page():
 
         # Find the search input and type a query
         search_input = page.locator('input[type="text"]').first
-        search_input.fill("[ROLE]")
+        search_input.fill("python")
         search_input.press("Enter")
         time.sleep(3)  # Wait for search results
 
         # Check that some content appeared (results or "No results" info)
         body_text = page.locator('[data-testid="stAppViewContainer"]').inner_text()
-        has_results = "results" in body_text.lower() or "[role]" in body_text.lower()
+        has_results = "results" in body_text.lower() or "python" in body_text.lower()
 
         print(f"\n=== Search Test ===")
-        print(f"  Query: [ROLE]")
+        print(f"  Query: python")
         print(f"  Has results: {has_results}")
 
         browser.close()
 
-        assert has_results, "Search page did not show results for '[ROLE]'"
+        assert has_results, "Search page did not show results for 'python'"
 
 
 if __name__ == "__main__":
