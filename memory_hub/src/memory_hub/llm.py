@@ -33,7 +33,7 @@ VALID_CATEGORIES = frozenset({
 })
 
 FACT_EXTRACTION_PROMPT = """\
-Analyze these conversation messages from a user named the user. \
+Analyze these conversation messages. \
 Extract factual statements ONLY about the user (the "user" role messages represent the user speaking).
 
 Rules:
@@ -41,9 +41,9 @@ Rules:
 - Skip: opinions about external topics, transient requests, conversational filler, \
   assistant responses, generic questions
 - Skip vague matches like "Preference: her", "Preference: the app", "Location: Cowork"
-- Good examples: "Lives in Springfield", "Works at Acme as Software Engineer", \
-  "Drives a [VEHICLE]", "Has a partner"
-- Bad examples: "Preference: the money guy", "Location: Springfield Springfield and wants an app..."
+- Good examples: "Lives in [city]", "Works at [employer] as [role]", \
+  "Drives a [make/model]", "Has a partner"
+- Bad examples: "Preference: the money guy", "Location: somewhere and wants an app..."
 
 Categories: identity, work, preference, relationship, financial, lifestyle, interest
 

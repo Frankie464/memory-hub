@@ -8,7 +8,6 @@ import streamlit as st
 
 from memory_hub.config import (
     ALL_DIRS,
-    CANONICAL_DIR,
     CHANGELOG_PATH,
     DB_PATH,
     PROFILE_GENERATED_PATH,
@@ -20,7 +19,6 @@ from memory_hub.config import (
     RAW_DIR,
     REPORTS_DIR,
     SCRIPTS_DIR,
-    SEED_EXPORT_PATH,
 )
 from memory_hub.db import (
     get_active_facts,
@@ -306,18 +304,14 @@ Creates the database, all data directories, and starter files.
 This is safe to run more than once.
 """)
         if st.button("🚀 Initialize Now", type="primary"):
-            import shutil
             for d in ALL_DIRS:
                 d.mkdir(parents=True, exist_ok=True)
             init_db(DB_PATH)
-            dest = CANONICAL_DIR / "user_memory_export.md"
-            if SEED_EXPORT_PATH.exists() and not dest.exists():
-                shutil.copy2(SEED_EXPORT_PATH, dest)
             if not CHANGELOG_PATH.exists():
                 CHANGELOG_PATH.write_text("# Changelog\n", encoding="utf-8")
             if not PROFILE_MANUAL_PATH.exists():
                 PROFILE_MANUAL_PATH.write_text(
-                    "# the user — Manual Profile\n"
+                    "# Manual Profile\n"
                     "# Edit this file to provide curated personal context.\n"
                     "# This file is NEVER auto-overwritten by memory-hub.\n\n"
                     "## Identity\n\n## Communication Style\n\n## Professional\n\n"
@@ -456,10 +450,10 @@ Use the **Ingest Data** page tabs for full controls.
     with st.expander("🔬 Step 6 — Build your memory profile", expanded=_db_ready() and not PROFILE_GENERATED_PATH.exists()):
         st.markdown("""
 Reconcile scans all ingested events and extracts facts (identity, preferences, work, interests, etc.)
-into the canonical database. It then generates `user_profile.generated.md` automatically.
+into the canonical database. It then generates `profile.generated.md` automatically.
 
 After reconciling, review the generated profile and copy anything you want to keep permanently
-into `user_profile.manual.md` — the manual file is **never** auto-overwritten.
+into `profile.manual.md` — the manual file is **never** auto-overwritten.
 """)
         if st.button("🔬 Run Reconcile", type="primary"):
             _require_db()
@@ -1073,7 +1067,7 @@ elif page == "🔍 Search History":
 
     col_q, col_lim = st.columns([5, 1])
     with col_q:
-        query = st.text_input("Search query", placeholder="e.g. [ROLE], Smith chart, girlfriend, FIRE...")
+        query = st.text_input("Search query", placeholder="e.g. project name, topic, person, goal...")
     with col_lim:
         limit = st.number_input("Max results", min_value=5, max_value=100, value=20, step=5)
 

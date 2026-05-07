@@ -2,7 +2,7 @@
 
 ## What This Project Is
 
-This is **memory-hub**: a local Python application that serves as a cross-AI memory management system for the user. It ingests conversation history from ChatGPT, Claude, and OpenClaw, normalizes it into a SQLite database, extracts memory facts, and generates platform-specific "projections" (CLAUDE.md additions, Claude.ai memory import chunks, OpenClaw memory files, etc.).
+This is **memory-hub**: a local Python application that serves as a cross-AI memory management system for a single user. It ingests conversation history from ChatGPT, Claude, and OpenClaw, normalizes it into a SQLite database, extracts memory facts, and generates platform-specific "projections" (CLAUDE.md additions, Claude.ai memory import chunks, OpenClaw memory files, etc.).
 
 The primary interface is a **Streamlit web dashboard** (`hub gui`). CLI commands exist for automation and scheduling.
 
@@ -12,8 +12,8 @@ The primary interface is a **Streamlit web dashboard** (`hub gui`). CLI commands
 - **Events**: raw messages from all AI platforms, stored once, deduped by event_id
 - **Facts**: distilled memory statements extracted from events via pattern matching
 - **Projections**: platform-specific output files generated from facts (never edited manually)
-- **Manual profile**: `data/canonical/user_profile.manual.md` — authoritative, NEVER auto-overwritten
-- **Generated profile**: `data/canonical/user_profile.generated.md` — rebuilt by `hub reconcile`
+- **Manual profile**: `data/canonical/profile.manual.md` — authoritative, NEVER auto-overwritten
+- **Generated profile**: `data/canonical/profile.generated.md` — rebuilt by `hub reconcile`
 
 ## Project Structure
 

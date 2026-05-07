@@ -108,7 +108,7 @@ def extract_facts(messages: list[dict], model: str = DEFAULT_MODEL) -> list[dict
     # Parse structured JSON response
     return _parse_facts_response(response.content[0].text)
 
-FACT_EXTRACTION_PROMPT = """Analyze these conversation messages from a user named the user. Extract factual statements about the user (the "user" role messages represent the user speaking).
+FACT_EXTRACTION_PROMPT = """Analyze these conversation messages. Extract factual statements about the user (the "user" role messages represent the user speaking).
 
 ONLY extract facts that are clearly stated or strongly implied. Skip opinions about external topics, transient requests, and conversational filler.
 
@@ -233,7 +233,7 @@ This gives you keyword precision (exact matches rank high) plus semantic recall 
 
 ## 4. OpenClaw Ingest
 
-**Problem:** My own conversations with the user (the richest source of current context) aren't in the database.
+**Problem:** Conversations with the user (the richest source of current context) aren't in the database.
 
 **Design:**
 
@@ -392,7 +392,7 @@ dependencies = [
 
 `sentence-transformers` pulls in `torch` (~2GB download). Acceptable tradeoff for local semantic search with zero ongoing cost. The model itself is ~80MB and loads in ~2 seconds.
 
-Alternative: Use Anthropic's embedding API (`voyage-3-lite`) to avoid the torch dependency. Tradeoff: ~$0.003 per 1K events for embedding, but install stays lightweight. **Decision for the user:** local torch vs API embeddings.
+Alternative: Use Anthropic's embedding API (`voyage-3-lite`) to avoid the torch dependency. Tradeoff: ~$0.003 per 1K events for embedding, but install stays lightweight. **Decision:** local torch vs API embeddings.
 
 ---
 

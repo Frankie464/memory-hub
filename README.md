@@ -268,5 +268,9 @@ The source code, scripts, and seed data are all in the repo. The database and pr
 
 - **SQLite + FTS5** — canonical store with full-text search
 - **Pattern-based reconciliation** — no LLM API calls, no cost, fast
-- **Two-file profile** — `user_profile.manual.md` (human-edited, never overwritten) + `user_profile.generated.md` (auto-rebuilt)
+- **Two-file profile** — `profile.manual.md` (human-edited, never overwritten) + `profile.generated.md` (auto-rebuilt)
 - **Deploy is always opt-in** — `hub project` generates to `data/projections/`; `--deploy` flag writes to actual platform locations
+
+## License
+
+See the [LICENSE](LICENSE) file in the repository root.

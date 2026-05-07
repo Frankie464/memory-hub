@@ -1,6 +1,5 @@
 """Click CLI entry point for memory-hub."""
 import io
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,7 +18,6 @@ console = Console()
 
 from memory_hub.config import (
     ALL_DIRS,
-    CANONICAL_DIR,
     CHANGELOG_PATH,
     DB_PATH,
     PROFILE_GENERATED_PATH,
@@ -31,7 +29,6 @@ from memory_hub.config import (
     RAW_DIR,
     REPORTS_DIR,
     SCRIPTS_DIR,
-    SEED_EXPORT_PATH,
 )
 from memory_hub.db import get_connection, get_stats, init_db, search_events
 
@@ -59,14 +56,6 @@ def init():
     init_db(DB_PATH)
     console.print(f"  [green]OK[/green] Database ready: {DB_PATH}")
 
-    # Copy seed export if it exists and hasn't been copied yet
-    dest = CANONICAL_DIR / "user_memory_export.md"
-    if SEED_EXPORT_PATH.exists() and not dest.exists():
-        shutil.copy2(SEED_EXPORT_PATH, dest)
-        console.print(f"  [green]OK[/green] Copied seed export to {dest}")
-    elif dest.exists():
-        console.print(f"  [dim]- Seed export already in canonical dir[/dim]")
-
     # Create empty changelog if missing
     if not CHANGELOG_PATH.exists():
         CHANGELOG_PATH.write_text("# Changelog\n", encoding="utf-8")
@@ -75,7 +64,7 @@ def init():
     # Create empty manual profile placeholder if missing
     if not PROFILE_MANUAL_PATH.exists():
         PROFILE_MANUAL_PATH.write_text(
-            "# the user - Manual Profile\n"
+            "# Manual Profile\n"
             "# Edit this file to provide curated personal context.\n"
             "# This file is NEVER auto-overwritten by memory-hub.\n\n"
             "## Identity\n\n"

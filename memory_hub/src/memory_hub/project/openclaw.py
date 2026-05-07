@@ -50,7 +50,7 @@ def project_openclaw(deploy: bool = False, openclaw_memory_dir: Path = None, db_
 
     # ── Full MEMORY.md ────────────────────────────────────────────────────────
     memory_lines = [
-        "# the user — Persistent Memory",
+        "# Persistent Memory",
         f"# Last updated: {date_str} by memory-hub",
         "",
     ]
@@ -82,7 +82,7 @@ def project_openclaw(deploy: bool = False, openclaw_memory_dir: Path = None, db_
 
     # ── Session Brief ─────────────────────────────────────────────────────────
     brief_lines = [
-        "# Session Brief — the user",
+        "# Session Brief",
         f"# Generated: {date_str} | Source: memory-hub ({len(facts)} facts)",
         "# Read this on every new session for cross-conversation context.",
         "",

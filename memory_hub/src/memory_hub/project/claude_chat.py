@@ -17,7 +17,7 @@ CHUNK_CATEGORIES = [
 
 
 def _read_manual_profile() -> dict[str, list[str]]:
-    """Parse user_profile.manual.md into category → statements."""
+    """Parse profile.manual.md into category → statements."""
     if not PROFILE_MANUAL_PATH.exists():
         return {}
     text = PROFILE_MANUAL_PATH.read_text(encoding="utf-8")

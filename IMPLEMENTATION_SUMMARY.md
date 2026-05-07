@@ -102,7 +102,7 @@ The ANTHROPIC_API_KEY environment variable contains a key that's not recognized 
 - `hub reconcile --llm` (falls back to regex silently)
 - `hub summarize --backfill` (skips, logs warning)
 
-**Fix needed:** the user needs to set a valid Anthropic API key (sk-ant-* format from https://console.anthropic.com/account/keys) for LLM features to work.
+**Fix needed:** You need to set a valid Anthropic API key (sk-ant-* format from https://console.anthropic.com/account/keys) for LLM features to work.
 
 ## Files Modified/Created
 

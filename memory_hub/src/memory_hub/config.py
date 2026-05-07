@@ -14,10 +14,9 @@ REPORTS_DIR = PROJECT_ROOT / "reports"
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 
 DB_PATH = CANONICAL_DIR / "hub.db"
-PROFILE_MANUAL_PATH = CANONICAL_DIR / "user_profile.manual.md"
-PROFILE_GENERATED_PATH = CANONICAL_DIR / "user_profile.generated.md"
+PROFILE_MANUAL_PATH = CANONICAL_DIR / "profile.manual.md"
+PROFILE_GENERATED_PATH = CANONICAL_DIR / "profile.generated.md"
 CHANGELOG_PATH = CANONICAL_DIR / "changelog.md"
-SEED_EXPORT_PATH = PROJECT_ROOT / "user_memory_export.md"
 
 # Claude Code paths
 CLAUDE_MD_PATH = Path.home() / ".claude" / "CLAUDE.md"

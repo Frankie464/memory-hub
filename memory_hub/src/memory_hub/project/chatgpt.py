@@ -24,7 +24,7 @@ def project_chatgpt(db_path: Path = DB_PATH) -> dict[str, Path]:
 
     # ── Profile Pack ──────────────────────────────────────────────────────────
     profile_lines = [
-        "# the user — Portable Profile Pack",
+        "# Portable Profile Pack",
         f"# Generated: {now} | Use with any AI assistant",
         "",
         "## Who I Am",
@@ -54,10 +54,17 @@ def project_chatgpt(db_path: Path = DB_PATH) -> dict[str, Path]:
         "",
         "## What would you like ChatGPT to know about you?",
         "",
-        "My name is the user. I'm 25, born in 2000, based in Springfield.",
-        f"I work as an [ROLE] Design Validation Engineer.",
+        "# Profile content below; edit profile.manual.md to customize.",
         "",
     ]
+    # Identity facts from the canonical store (e.g. "Lives in ...", "Born in ...")
+    identity = get_statements(facts, "identity")
+    for s in identity[:4]:
+        custom_instr_lines.append(f"- {s}")
+    # Work context
+    for s in work[:2]:
+        custom_instr_lines.append(f"- {s}")
+    custom_instr_lines.append("")
     for s in prefs[:6]:
         custom_instr_lines.append(f"- {s}")
     custom_instr_content = "\n".join(custom_instr_lines)
